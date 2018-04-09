@@ -1,0 +1,12 @@
+# Configurazione per il driver ds3
+exec=/usr/local/share/jng/drivers/ds3
+
+set_mac_on_connect = int    | 0 | Imposta il MAC master quando viene collegato.
+mac_src            = int    | 2 | Da dove prendere il MAC. 0 -> dalle impostazioni (master_mac), 1 -> da 'hcitool dev', 2 -> da hcitool e, se fallisce, dalle impostazioni
+master_mac         = string |00:00:00:00:00:00| Il MAC da impostare (con mac_src a 0 o 2)
+
+set_led_number = int    | 1  | Imposta i led del joystick in modo da indicare il numero del joystick quando viene connesso
+set_fixed_leds = int    | 0  | Se è 1 imposta i led come descritto in fixed_leds e non in base al numero del joystick
+fixed_leds     = string |0001| Questa stringa indica i led fissi, dal quarto al primo
+
+blink_leds     = int | 1 | Se impostato a 1 fa lampeggiare i led se il controller si sta caricando
