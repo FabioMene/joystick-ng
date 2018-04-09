@@ -1,0 +1,2 @@
+0x01609ead	jng_add_driver	/home/fabio/Scrivania/Robe/joystick-ng/joystick_ng	EXPORT_SYMBOL
+0x7dd1f971	jng_remove_driver	/home/fabio/Scrivania/Robe/joystick-ng/joystick_ng	EXPORT_SYMBOL
