@@ -54,7 +54,7 @@
 //   I file in settings contengono le opzioni modificate con jngdctl
 //   Il formato è
 //     nome_opzione=valore
-//   Il tipo è ricavato del file in defs
+//   Il tipo è ricavato dal file in defs
 // Il driver è responsabile di ricaricare autonomamente le opzioni se vengono modificate
 // Generalmente i driver daemon (per esempio server bluetooth in background, non lanciato
 // per un dispositivo in particolare ma per attenderne la connessione) dovrebbero ricaricare
