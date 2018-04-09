@@ -1,0 +1,2 @@
+# Regole udev per joystick-ng
+SUBSYSTEM=="joystick-ng", OWNER="root", GROUP="input", MODE="0666"

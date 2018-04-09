@@ -1,0 +1,3 @@
+# joystick-ng driver ds3
+# Avvia il driver quando un ds3 viene collegato
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="054c", ATTR{idProduct}=="0268", RUN+="/usr/local/bin/jngdctl start ds3 %E{BUSNUM} %E{DEVNUM}"
