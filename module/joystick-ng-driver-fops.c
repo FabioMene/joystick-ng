@@ -311,12 +311,17 @@ static int jng_driver_release(struct inode* in, struct file* fp){
 struct file_operations joystick_ng_driver_fops = {
     // Con owner impostato il reference counter del modulo viene aggiornato automaticamente, qui abbiamo technology
     .owner          = THIS_MODULE,
+    
     .open           = jng_driver_open,
+    
     .read           = jng_driver_read,
-    .write          = jng_driver_write,
     .poll           = jng_driver_poll,
     .flush          = jng_driver_flush,
+    .write          = jng_driver_write,
+    
     .unlocked_ioctl = jng_driver_ioctl,
+    .compat_ioctl   = jng_driver_ioctl,
+    
     .release        = jng_driver_release,
     
     .llseek         = no_llseek

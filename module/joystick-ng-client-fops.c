@@ -21,7 +21,7 @@
  * 
  */
 
-// Device driver per client (il file è una brutta copia di joystick-ng-driver-dops.c)
+// Device driver per client (il file è una brutta copia di joystick-ng-driver-fops.c)
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -282,6 +282,7 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
         case JNGIOCGETEVMASK:
             return copy_to_user((unsigned int*)arg, &jng_connection_data->evmask, sizeof(unsigned int)) ? -EFAULT : 0;
     }
+
     return -ENOTTY;
 }
 
@@ -294,12 +295,17 @@ static int jng_client_release(struct inode* in, struct file* fp){
 
 struct file_operations joystick_ng_client_fops = {
     .owner          = THIS_MODULE,
+    
     .open           = jng_client_open,
+    
     .read           = jng_client_read,
-    .write          = jng_client_write,
     .poll           = jng_client_poll,
     .flush          = jng_client_flush,
+    .write          = jng_client_write,
+    
     .unlocked_ioctl = jng_client_ioctl,
+    .compat_ioctl   = jng_client_ioctl,
+    
     .release        = jng_client_release,
     
     .llseek         = no_llseek
