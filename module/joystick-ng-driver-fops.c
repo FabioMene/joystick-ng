@@ -219,8 +219,22 @@ static unsigned int jng_driver_poll(struct file* fp, poll_table* pt){
     return mask;
 }
 
+static int jng_driver_flush(struct file* fp, fl_owner_t id){
+    // Non viene controllata la modalità in lettura
+    // Se si è in lettura normale questo non avrà effetto
+    
+    // Cancella la coda degli eventi
+    jng_queue_delall(&jng_connection_data->rbuffer);
+    // Aggiorna le differenze
+    jng_feedback_lock();
+    memcpy(&jng_connection_data->tmpfeedback, &jng_connection_data->joystick->feedback, sizeof(jng_feedback_t));
+    jng_feedback_unlock();
+    memcpy(&jng_connection_data->diff.feedback, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t));
+    return 0;
+}
+
 static int jng_del_unwanted_events_cb(void* el, void* arg){
-    return *((unsigned int*)arg) & ((jng_event_t*)el)->type;
+    return !(*((unsigned int*)arg) & ((jng_event_t*)el)->type);
 }
 
 static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long arg){
@@ -250,12 +264,12 @@ static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
         
         case JNGIOCSETMODE:
             jng_connection_data->mode = arg;
-            if(!(arg & JNG_RMODE_EVENT)) jng_queue_delall(&jng_connection_data->rbuffer);
-            else {
-                jng_feedback_lock();
-                memcpy(&jng_connection_data->tmpfeedback, &jng_connection_data->joystick->feedback, sizeof(jng_feedback_t));
-                jng_feedback_unlock();
-                memcpy(&jng_connection_data->diff.feedback, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t));
+            if(!(arg & JNG_RMODE_EVENT)){
+                // Quando si esce dalla lettura ad eventi cancella la coda
+                jng_queue_delall(&jng_connection_data->rbuffer);
+            } else {
+                // Se si imposta la lettura ad eventi si azzera la struttura delle differenze, così gli eventi vengono ricreati
+                memset(&jng_connection_data->diff.feedback, 0, sizeof(jng_feedback_t));
             }
             return 0;
         
@@ -300,6 +314,7 @@ struct file_operations joystick_ng_driver_fops = {
     .read           = jng_driver_read,
     .write          = jng_driver_write,
     .poll           = jng_driver_poll,
+    .flush          = jng_driver_flush,
     .unlocked_ioctl = jng_driver_ioctl,
     .release        = jng_driver_release,
     

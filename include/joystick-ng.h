@@ -334,6 +334,8 @@ typedef struct {
 //     C: jng_feedback_t
 //     D: jng_state_t
 // Per le modalità ad eventi sia C che D leggono e scrivono jng_event_t
+// Cambiando modalità di lettura da normale ad eventi vengono rigenerati e messi in coda di lettura
+// tutti gli eventi. La coda può essere svuotata in qualsiasi momento chiamando flush()
 // Trovatemi un modulo più flessibile di questo
 #define JNGIOCSETMODE _IOW(JNG_IOCTL_TYPE, 0x02, unsigned int)
 

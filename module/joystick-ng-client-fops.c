@@ -212,8 +212,22 @@ static unsigned int jng_client_poll(struct file* fp, poll_table* pt){
     return mask;
 }
 
+static int jng_client_flush(struct file* fp, fl_owner_t id){
+    // Non viene controllata la modalità in lettura
+    // Se si è in lettura normale questo non avrà effetto
+    
+    // Cancella la coda degli eventi
+    jng_queue_delall(&jng_connection_data->rbuffer);
+    // Aggiorna le differenze
+    jng_state_rlock();
+    memcpy(&jng_connection_data->tmpstate, &jng_connection_data->joystick->state, sizeof(jng_state_t));
+    jng_state_runlock();
+    memcpy(&jng_connection_data->diff.state, &jng_connection_data->tmpstate, sizeof(jng_state_t));
+    return 0;
+}
+
 static int jng_del_unwanted_events_cb(void* el, void* arg){
-    return *((unsigned int*)arg) & ((jng_event_t*)el)->type;
+    return !(*((unsigned int*)arg) & ((jng_event_t*)el)->type);
 }
 
 static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long arg){
@@ -246,12 +260,12 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
         case JNGIOCSETMODE:
             if(jng_connection_data->joystick == NULL) return -EINVAL;
             jng_connection_data->mode = arg;
-            if(!(arg & JNG_RMODE_EVENT)) jng_queue_delall(&jng_connection_data->rbuffer);
-            else {
-                jng_state_rlock();
-                memcpy(&jng_connection_data->tmpstate, &jng_connection_data->joystick->state, sizeof(jng_state_t));
-                jng_state_runlock();
-                memcpy(&jng_connection_data->diff.state, &jng_connection_data->tmpstate, sizeof(jng_state_t));
+            if(!(arg & JNG_RMODE_EVENT)){
+                // Cancella la coda degli eventi quando si va in mod lettura normale
+                jng_queue_delall(&jng_connection_data->rbuffer);
+            } else {
+                // Azzera le differenze quando si entra in mod lettura eventi
+                memset(&jng_connection_data->diff.state, 0, sizeof(jng_state_t));
             }
             return 0;
         
@@ -284,6 +298,7 @@ struct file_operations joystick_ng_client_fops = {
     .read           = jng_client_read,
     .write          = jng_client_write,
     .poll           = jng_client_poll,
+    .flush          = jng_client_flush,
     .unlocked_ioctl = jng_client_ioctl,
     .release        = jng_client_release,
     
