@@ -28,8 +28,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <syslog.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <bluetooth/bluetooth.h>
@@ -42,6 +44,7 @@
 #include "../../utils/libjngdsett/libjngdsett.h"
 
 
+#define printd(fmt...) syslog(LOG_DEBUG,   fmt);
 #define printi(fmt...) syslog(LOG_INFO,    fmt);
 #define printw(fmt...) syslog(LOG_WARNING, fmt);
 #define printe(fmt...) syslog(LOG_ERR,     fmt);
@@ -58,9 +61,10 @@ int l2cap_create_socket(const bdaddr_t *bdaddr, unsigned short psm, int lm, int 
 int get_sdp_device_info(const bdaddr_t *src, const bdaddr_t *dst, struct hidp_connadd_req *req);
 
 int client_loop(int ctrl, int intr);
+void* sender_thread_loop(void* arg);
 
 jng_info_t jng_info = {
-    .name      = "Sony DualShock3",
+    .name      = "Sony DualShock3 (Bluetooth)",
     .keys      = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_L3 | JNG_KEY_R3 | JNG_KEY_DIRECTIONAL | JNG_KEY_START | JNG_KEY_SELECT | JNG_KEY_OPTIONS1,
     .axis      = JNG_AXIS_LX | JNG_AXIS_LY | JNG_AXIS_RX | JNG_AXIS_RY,
     .sensors   = JNG_SEN_ACCEL_X | JNG_SEN_ACCEL_Y | JNG_SEN_ACCEL_Z | JNG_SEN_GYRO_X,
@@ -94,8 +98,8 @@ typedef struct {
     unsigned char      A;
     unsigned char      X;
     unsigned char      res4[3];
-    unsigned char      cstate; // probabilmente stato di ricarica ? 02 = carica; 03 = batteria
-    unsigned char      power; // ?
+    unsigned char      cstate; // non 3: in carica, 3: non in carica
+    unsigned char      blevel; // 238: in carica (livello non disponibile), 0 -> 5: 0 -> 100%
     unsigned char      conn; // usb/bluetooth?
     unsigned char      res5[9];
     unsigned short int accelX;
@@ -103,6 +107,13 @@ typedef struct {
     unsigned short int accelZ;
     unsigned short int gyroX;
 } ds3_report_t;
+
+typedef struct {
+    int jngfd;
+    int ctrlfd;
+    
+    unsigned char blevel;
+} sender_thread_arg_t;
 
 int main(int argc, char* argv[]){
     // Apri log
@@ -170,7 +181,7 @@ int main(int argc, char* argv[]){
         printe("Impossibile inizializzare il socket di controllo");
         return 1;
     }
-    
+
     int intserv = l2cap_create_socket(&bdaddr, L2CAP_PSM_HIDP_INTR, L2CAP_LM_MASTER, 10);
     if(intserv < 0){
         close(ctrlserv);
@@ -190,19 +201,23 @@ int main(int argc, char* argv[]){
         memset(&req, 0, sizeof(req));
         addrlen = sizeof(addr);
         if ((ctrlsock = accept(ctrlserv, (struct sockaddr*)&addr, &addrlen)) < 0){
+            printe("accept() control socket fallito: %d", errno);
             continue;
         }
         bacpy(&addr_dst, &addr.l2_bdaddr);
         if (getsockname(ctrlsock, (struct sockaddr*)&addr, &addrlen) < 0){
+            printe("getsockname() control socket fallito: %d", errno);
             close(ctrlsock);
             continue;
         }
         bacpy(&addr_src, &addr.l2_bdaddr);
         if ((intsock = accept(intserv, (struct sockaddr*)&addr, &addrlen)) < 0){
+            printe("accept() interrupt socket fallito: %d", errno);
             close(ctrlsock);
             continue;
         }
         if (bacmp(&addr_dst, &addr.l2_bdaddr)){
+            printe("Gli indirizzi control e interrupt non corrispondono");
             close(ctrlsock);
             close(intsock);
             continue;
@@ -213,8 +228,12 @@ int main(int argc, char* argv[]){
             if(pid < 0){
                 printe("Impossibile eseguire fork()");
             } else if(pid == 0){
+                // Chiudi socket server
+                close(ctrlserv);
+                close(intserv);
+                // Esegui il client mainloop
                 int res = client_loop(ctrlsock, intsock);
-                // Dal client
+                // Chiudi i socket con il joystick
                 close(ctrlsock);
                 close(intsock);
                 _Exit(res);
@@ -232,13 +251,23 @@ int main(int argc, char* argv[]){
 }
 
 char ds3_control_packet_template[50]={
-    0x52, 0x01,
-    0x00, 0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x02, 0xFF, 0x27, 0x10, 0x10, 0x32, 0xFF,
-    0x27, 0x10, 0x00, 0x32, 0xFF, 0x27, 0x10, 0x00,
-    0x32, 0xFF, 0x27, 0x10, 0x00, 0x32, 0x00, 0x00,
+    0x52, // SET_REPORT, Output
+    0X01, 0x00,
+    0xff, 0x00, // Small Act (Timeout, activation)
+    0xff, 0x00, // Big Act (Timeout, force)
+    0x00, 0x00, 0x00, 0x00,
+    0x00, // Led Mask (0x02 = Led1, 4=L2, 8=L3, 0x10=L4)
+    // Led blink data
+    // 0xff, sync/delay?, sync/delay?, Toff, Ton
+    // Charging period: 0x40
+    // Low battery period: 0x10 
+    0xFF, 0x27, 0x10, 0x00, 0x40, // Led 4 (offset +15, +16)
+    0xFF, 0x27, 0x10, 0x00, 0x40, // 3 (+20, +21)
+    0xFF, 0x27, 0x10, 0x00, 0x40, // 2 (+25, +26)
+    0xFF, 0x27, 0x10, 0x00, 0x40, // 1 (+30, +31)
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00
 };
 
 short get_threshold(char val){
@@ -247,50 +276,52 @@ short get_threshold(char val){
     return val << 8;
 }
 
-
 int client_loop(int ctrl, int intr){
-    // Invia attivazione
-    unsigned char enable_msg[] = {
-        0x53,
-        0xf4, 0x42, 0x03, 0x00, 0x00
-    };
-    send(ctrl, enable_msg, 6, 0);
+    // Ricarica la configurazione (per questo client)
+    jngdsett_load(NULL);
     
-    unsigned char ds3_control_packet[50];
-    memcpy(ds3_control_packet, ds3_control_packet_template, 50);
+    // Variabili usate ovunque
     
     unsigned char buffer[50];
     
+    // Invia attivazione
+    unsigned char enable_msg[] = {
+        0x53, // SET_REPORT, Feature
+        0xf4, 0x42, 0x03, 0x00, 0x00
+    };
+    send(ctrl, enable_msg, 6, 0);
+    recv(ctrl, buffer, 50, 0);
+    
     // Inizializza jng
     jng_state_t state;
-    jng_feedback_t feedback;
     ds3_report_t report;
     
-    int jngfd = open("/dev/jng/driver", O_RDWR);
+    memset(&state, 0, sizeof(jng_state_t));
+    
+    int jngfd = open("/dev/jng/driver", O_RDWR | O_NONBLOCK);
     if(jngfd < 0) return 1;
     
     // SO. So che le ioctl non falliscono, alias faccio quello che voglio
     ioctl(jngfd, JNGIOCSETINFO, &jng_info);
     
-    unsigned int slot;
-    ioctl(jngfd, JNGIOCGETSLOT, &slot);
+    ioctl(jngfd, JNGIOCSETMODE,   JNG_WMODE_NORMAL | JNG_RMODE_EVENT);
+    ioctl(jngfd, JNGIOCSETEVMASK, JNG_EV_FB_FORCE | JNG_EV_FB_LED);
     
     int res;
-    jngdsett_read("set_led_number", &res);
+    jngdsett_read("set_leds", &res);
     if(res){
         // Questo dimostra la flessibilità di joystick-ng
         unsigned int slot;
         ioctl(jngfd, JNGIOCGETSLOT, &slot);
         
-        int dfd = open("dev/jng/device", O_RDWR);
+        int dfd = open("/dev/jng/device", O_RDWR);
         ioctl(dfd, JNGIOCSETSLOT, slot);
         ioctl(dfd, JNGIOCSETMODE, JNG_MODE_EVENT);
         
         int l1 = 0, l2 = 0, l3 = 0, l4 = 0;
         char strres[256];
         
-        jngdsett_read("set_fixed_leds", &res);
-        if(res){ // Led fissi
+        if(res == 2){ // Led fissi
             jngdsett_read("fixed_leds", strres);
             l4 = strres[0] != '0';
             l3 = strres[1] != '0';
@@ -326,76 +357,197 @@ int client_loop(int ctrl, int intr){
         close(dfd);
     }
     
+    // Imposta il thread che si occupa di gestire l'output
+    pthread_t sender_thread;
+    sender_thread_arg_t arg = {
+        .jngfd  = jngfd,
+        .ctrlfd = ctrl,
+        
+        .blevel = 255
+    };
+    
+    if(pthread_create(&sender_thread, NULL, sender_thread_loop, &arg) < 0){
+        printw("Impossibile avviare il sender thread, no feedback disponibile");
+    }
+    
     // Mainloop!
     while(1){
         if(recv(intr, buffer, 50, 0) != 50) break;
-        if(!(buffer[0] == 0xa1 && buffer[1] == 0x01 && buffer[2] == 0x00)) break;
-        memcpy(&report, buffer + 1, sizeof(ds3_report_t));
-        
-        // Passa da ds3_report_t a jng_state_t
-        #define ds3_rep2keyp(k, jk) if((state.keyp.k = report.k) != 0) state.keys |= jk
-        #define ds3_rep2key(c, jk, kp) if(c){state.keys |= jk;state.keyp.kp = 255;}
-        state.keys          = 0;
-        state.keyp.L3       = 0;
-        state.keyp.R3       = 0;
-        state.keyp.Start    = 0;
-        state.keyp.Select   = 0;
-        state.keyp.Options1 = 0;
-        
-        ds3_rep2keyp(A,     JNG_KEY_A);
-        ds3_rep2keyp(B,     JNG_KEY_B);
-        ds3_rep2keyp(X,     JNG_KEY_X);
-        ds3_rep2keyp(Y,     JNG_KEY_Y);
-        
-        ds3_rep2keyp(L1,    JNG_KEY_L1);
-        ds3_rep2keyp(R1,    JNG_KEY_R1);
-        ds3_rep2keyp(L2,    JNG_KEY_L2);
-        ds3_rep2keyp(R2,    JNG_KEY_R2);
-        
-        ds3_rep2keyp(Down,  JNG_KEY_DOWN);
-        ds3_rep2keyp(Right, JNG_KEY_RIGHT);
-        ds3_rep2keyp(Left,  JNG_KEY_LEFT);
-        ds3_rep2keyp(Up,    JNG_KEY_UP);
-        
-        ds3_rep2key(report.keys & 0x02, JNG_KEY_L3,       L3);
-        ds3_rep2key(report.keys & 0x04, JNG_KEY_R3,       R3);
-        ds3_rep2key(report.keys & 0x08, JNG_KEY_START,    Start);
-        ds3_rep2key(report.keys & 0x01, JNG_KEY_SELECT,   Select);
-        ds3_rep2key(report.ps,          JNG_KEY_OPTIONS1, Options1);
-        
-        state.axis.LX = get_threshold(report.LX);
-        state.axis.LY = get_threshold(report.LY);
-        state.axis.RX = get_threshold(report.RX);
-        state.axis.RY = get_threshold(report.RY);
-        
-        state.accelerometer.x = (report.accelX - 128) << 8;
-        state.accelerometer.y = (report.accelY - 128) << 8;
-        state.accelerometer.z = (report.accelZ - 128) << 8;
-        state.gyrometer.x     = (report.gyroX - 128) << 8;
-        
-        write(jngfd, &state, sizeof(jng_state_t));
-        
-        // Passa da jng_feedback_t al joystick
-        read(jngfd, &feedback, sizeof(jng_feedback_t));
-        
-        ds3_control_packet[4] = ((unsigned int)feedback.force.smallmotor) >> 8;
-        ds3_control_packet[6] = ((unsigned int)feedback.force.bigmotor)   >> 8;
-        char leds = 0;
-        if(feedback.leds.led1) leds |= 0x02;
-        if(feedback.leds.led2) leds |= 0x04;
-        if(feedback.leds.led3) leds |= 0x08;
-        if(feedback.leds.led4) leds |= 0x10;
-        ds3_control_packet[11] = leds;
-        
-        if(send(ctrl, ds3_control_packet, 50, 0) < 0){
-            printw("Impossibile inviare i dati al joystick");
+        // HID Data, Input (0xa1) Protocol code: keyboard (0x01) 
+        if(!(buffer[0] == 0xa1 && buffer[1] == 0x01)) break;
+        // HID Modifiers: 0
+        if(buffer[2] == 0x00){
+            memcpy(&report, buffer + 1, sizeof(ds3_report_t));
+            
+            // Per il sender thread
+            arg.blevel = report.blevel;
+            
+            // Passa da ds3_report_t a jng_state_t
+            #define ds3_rep2keyp(k, jk) if((state.keyp.k = report.k) != 0) state.keys |= jk
+            #define ds3_rep2key(c, jk, kp) if(c){state.keys |= jk;state.keyp.kp = 255;}
+            state.keys          = 0;
+            state.keyp.L3       = 0;
+            state.keyp.R3       = 0;
+            state.keyp.Start    = 0;
+            state.keyp.Select   = 0;
+            state.keyp.Options1 = 0;
+            
+            ds3_rep2keyp(A,     JNG_KEY_A);
+            ds3_rep2keyp(B,     JNG_KEY_B);
+            ds3_rep2keyp(X,     JNG_KEY_X);
+            ds3_rep2keyp(Y,     JNG_KEY_Y);
+            
+            ds3_rep2keyp(L1,    JNG_KEY_L1);
+            ds3_rep2keyp(R1,    JNG_KEY_R1);
+            ds3_rep2keyp(L2,    JNG_KEY_L2);
+            ds3_rep2keyp(R2,    JNG_KEY_R2);
+            
+            ds3_rep2keyp(Down,  JNG_KEY_DOWN);
+            ds3_rep2keyp(Right, JNG_KEY_RIGHT);
+            ds3_rep2keyp(Left,  JNG_KEY_LEFT);
+            ds3_rep2keyp(Up,    JNG_KEY_UP);
+            
+            ds3_rep2key(report.keys & 0x02, JNG_KEY_L3,       L3);
+            ds3_rep2key(report.keys & 0x04, JNG_KEY_R3,       R3);
+            ds3_rep2key(report.keys & 0x08, JNG_KEY_START,    Start);
+            ds3_rep2key(report.keys & 0x01, JNG_KEY_SELECT,   Select);
+            ds3_rep2key(report.ps,          JNG_KEY_OPTIONS1, Options1);
+            
+            state.axis.LX = get_threshold(report.LX);
+            state.axis.LY = get_threshold(report.LY);
+            state.axis.RX = get_threshold(report.RX);
+            state.axis.RY = get_threshold(report.RY);
+            
+            state.accelerometer.x = (report.accelX - 128) << 8;
+            state.accelerometer.y = (report.accelY - 128) << 8;
+            state.accelerometer.z = (report.accelZ - 128) << 8;
+            state.gyrometer.x     = (report.gyroX - 128) << 8;
+            
+            write(jngfd, &state, sizeof(jng_state_t));
+            
+            // Aspetta un po, per non sovraccaricare la CPU
+            // usleep(POLL_TIME_USEC);
         }
-        
-        // Aspetta un po, per non sovraccaricare la CPU
-        usleep(POLL_TIME_USEC);
     }
     printe("Connessione persa");
     return 0;
+}
+
+void* sender_thread_loop(void* varg){
+    unsigned char ds3_control_packet[50];
+    memcpy(ds3_control_packet, ds3_control_packet_template, 50);
+    
+    unsigned char dummy_buffer[50];
+    
+    sender_thread_arg_t* arg = (sender_thread_arg_t*)varg;
+    jng_event_t ev;
+    
+    int blink;
+    jngdsett_read("blink_leds", &blink);
+    
+    // Invia il primo pacchetto
+    send(arg->ctrlfd, ds3_control_packet, 50, 0);
+    recv(arg->ctrlfd, dummy_buffer, 50, 0);
+    
+    int lastblevel = 0;
+    int changed    = 0;
+    
+    while(1){
+        // Passa da jng_feedback_t al joystick
+        if(read(arg->jngfd, &ev, sizeof(jng_event_t)) < 0){
+            // Invia il report quando non ci sono più eventi in coda
+            if(changed){
+                if(send(arg->ctrlfd, ds3_control_packet, 50, 0) < 0){
+                    printw("Impossibile inviare i dati al joystick");
+                } else {
+                    recv(arg->ctrlfd, dummy_buffer, 50, 0);
+                }
+                changed = 0;
+            }
+            
+            usleep(POLL_TIME_USEC);
+            continue;
+        }
+        
+        changed = 1;
+        switch(ev.type){
+            case JNG_EV_FB_FORCE:
+                switch(ev.what){
+                    case JNG_FB_FORCE_SMALLMOTOR:
+                        ds3_control_packet[4] = ev.value ? 255 : 0;
+                        break;
+                    case JNG_FB_FORCE_BIGMOTOR:
+                        ds3_control_packet[6] = ev.value >> 8;
+                        break;
+                    default:
+                        changed = 0;
+                        break;
+                }
+                break;
+            
+            case JNG_EV_FB_LED: {
+                char ledmask = 0;
+                switch(ev.what){
+                    case JNG_FB_LED_1:
+                        ledmask = 0x02;
+                        break;
+                    case JNG_FB_LED_2:
+                        ledmask = 0x04;
+                        break;
+                    case JNG_FB_LED_3:
+                        ledmask = 0x08;
+                        break;
+                    case JNG_FB_LED_4:
+                        ledmask = 0x10;
+                        break;
+                    default:
+                        changed = 0;
+                        break;
+                }
+                
+                if(ev.value) ds3_control_packet[11] |=  ledmask;
+                else         ds3_control_packet[11] &= ~ledmask;
+                
+                } break;
+            
+            default:
+                changed = 0;
+                break;
+        }
+        
+        if(blink && arg->blevel != lastblevel){
+            lastblevel = arg->blevel;
+            
+            // Normale
+            unsigned char Ton  = 0x80;
+            unsigned char Toff = 0x00;
+            
+            if(arg->blevel == 238){ // In carica
+                Ton  = 0x40;
+                Toff = 0x40;
+            } else if(arg->blevel <= 1){ // Scarico
+                Ton  = 0x10;
+                Toff = 0x10;
+            }
+            
+            ds3_control_packet[15] = Toff;
+            ds3_control_packet[16] = Ton;
+            
+            ds3_control_packet[20] = Toff;
+            ds3_control_packet[21] = Ton;
+            
+            ds3_control_packet[25] = Toff;
+            ds3_control_packet[26] = Ton;
+            
+            ds3_control_packet[30] = Toff;
+            ds3_control_packet[31] = Ton;
+            
+            changed |= 1;
+        }
+    }
+    
+    // Per il compilatore
+    return NULL;
 }
 
 int l2cap_create_socket(const bdaddr_t *bdaddr, unsigned short psm, int lm, int backlog){
@@ -407,7 +559,7 @@ int l2cap_create_socket(const bdaddr_t *bdaddr, unsigned short psm, int lm, int 
     addr.l2_family = AF_BLUETOOTH;
     bacpy(&addr.l2_bdaddr, bdaddr);
     addr.l2_psm = htobs(psm);
-    if (bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0){
         close(sock);
         return -1;
     }
@@ -417,7 +569,7 @@ int l2cap_create_socket(const bdaddr_t *bdaddr, unsigned short psm, int lm, int 
     opts.omtu = HIDP_DEFAULT_MTU;
     opts.flush_to = 0xffff;
     setsockopt(sock, SOL_L2CAP, L2CAP_OPTIONS, &opts, sizeof(opts));
-    if (listen(sock, backlog) < 0) {
+    if (listen(sock, backlog) < 0){
         close(sock);
         return -1;
     }

@@ -1,5 +1,5 @@
 all:
-	gcc main.c -o ds3btdrv -L../../utils/libjngdsett -ljngdsett -lbluetooth
+	gcc -Wall main.c -o ds3btdrv -L../../utils/libjngdsett -ljngdsett -lbluetooth -pthread
 
 install:
 	install -m 755 ds3btdrv /usr/local/share/jng/drivers/ds3bt
