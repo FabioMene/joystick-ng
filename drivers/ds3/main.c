@@ -84,8 +84,8 @@ typedef struct {
     unsigned char      A;
     unsigned char      X;
     unsigned char      res4[3];
-    unsigned char      cstate; // probabilmente stato di ricarica ? 02 = carica; 03 = batteria
-    unsigned char      power; // ?
+    unsigned char      cstate; // non 3: in carica, 3: non in carica
+    unsigned char      blevel; // 238: in carica (livello non disponibile), 0 -> 5: 0 -> 100%
     unsigned char      conn; // usb/bluetooth?
     unsigned char      res5[9];
     unsigned short int accelX;
@@ -98,37 +98,50 @@ ds3_report_t report;
 
 // boh
 char ds3_control_packet[48]={
-    0x00, 0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x02, 0xFF, 0x27, 0x10, 0x10, 0x32, 0xFF,
-    0x27, 0x10, 0x00, 0x32, 0xFF, 0x27, 0x10, 0x00,
-    0x32, 0xFF, 0x27, 0x10, 0x00, 0x32, 0x00, 0x00,
+    0x00,
+    0xff, 0x00, // Small Act (Timeout, activation)
+    0xff, 0x00, // Big Act (Timeout, force)
+    0x00, 0x00, 0x00, 0x00,
+    0x1e, // Led Mask (0x02 = Led1, 4=L2, 8=L3, 0x10=L4)
+    // Led blink data
+    // 0xff, sync/delay?, sync/delay?, Toff, Ton
+    // Charging period: 0x40
+    // Low battery period: 0x10 
+    0xFF, 0x27, 0x10, 0x00, 0x40, // Led 4
+    0xFF, 0x27, 0x10, 0x00, 0x40, // 3
+    0xFF, 0x27, 0x10, 0x00, 0x40, // 2
+    0xFF, 0x27, 0x10, 0x00, 0x40, // 1
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00
 };
 
-int leds_blink       = 0;
-int ds3_not_charging = 0;
-int leds_state       = 0;
-int leds_counter     = 0;
+int blink_leds = 0;
 
-void ds3_set_feedback(){
+void ds3_set_feedback(int cstate){
+    // Motori
     ds3_control_packet[2] = ((unsigned int)feedback.force.smallmotor) ? 255 : 0;
     ds3_control_packet[4] = ((unsigned int)feedback.force.bigmotor) >> 8;
-    char leds = 0;
-    if((leds_blink && leds_state) || !leds_blink || ds3_not_charging){
-        if(feedback.leds.led1) leds |= 0x02;
-        if(feedback.leds.led2) leds |= 0x04;
-        if(feedback.leds.led3) leds |= 0x08;
-        if(feedback.leds.led4) leds |= 0x10;
-    }
-    ds3_control_packet[9] = leds;
+    
+    // Led
+    ds3_control_packet[9] = 0;
+    if(feedback.leds.led1) ds3_control_packet[9] |= 0x02;
+    if(feedback.leds.led2) ds3_control_packet[9] |= 0x04;
+    if(feedback.leds.led3) ds3_control_packet[9] |= 0x08;
+    if(feedback.leds.led4) ds3_control_packet[9] |= 0x10;
+     
+    // Lampeggiamento led
+    unsigned char Toff = 0x00;
+    if(blink_leds && cstate != 3) Toff = 0x40;
+    ds3_control_packet[15] = Toff;
+    ds3_control_packet[20] = Toff;
+    ds3_control_packet[25] = Toff;
+    ds3_control_packet[30] = Toff;
+    
+    // Invio dati
     int ur = usb_control_msg(handle, USB_ENDPOINT_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE, 0x09, 0x0201, 0, ds3_control_packet, 48, 100);
     if(ur < 0){
         printw("invio dati usb: %d\n", ur);
-    }
-    if(--leds_counter < 0){
-        leds_counter = 1000000 / 5000;
-        leds_state != leds_state;
     }
 }
 
@@ -200,22 +213,21 @@ int main(int argc, char* argv[]){
     // Caricamento configurazione
     int res;
     char strres[256];
-    jngdsett_read("set_mac_on_connect", &res);
+    jngdsett_read("set_master_mac", &res);
     
     if(res){
         int mac[6], set_mac = 0;
-        jngdsett_read("mac_src", &res);
         switch(res){
-            case 1: // Prendi da hcitool dev
-            case 2: {// Prova hcitool e fallback sulle impostazioni
+            case 2: // Prendi da hcitool dev
+            case 3: {// Prova hcitool e fallback sulle impostazioni
                     FILE* hcitool = popen("hcitool dev", "r");
                     if(fscanf(hcitool, "%*s\n%x:%x:%x:%x:%x:%x", mac + 0, mac + 1, mac + 2, mac + 3, mac + 4, mac + 5) == 6){
                         set_mac = 1;
                     }
                     pclose(hcitool);
-                    if(res == 1) break;
+                    if(res == 2) break;
                 }
-            case 0: // Prendi dalle impostazioni
+            case 1: // Prendi dalle impostazioni
             default:
                 jngdsett_read("master_mac", strres);
                 if(sscanf(strres, "%x:%x:%x:%x:%x:%x", mac + 0, mac + 1, mac + 2, mac + 3, mac + 4, mac + 5) == 6){
@@ -250,20 +262,20 @@ int main(int argc, char* argv[]){
     unsigned int slot;
     ioctl(jngfd, JNGIOCGETSLOT, &slot);
     
-    jngdsett_read("set_led_number", &res);
+    jngdsett_read("set_leds", &res);
     if(res){
         // Questo dimostra la flessibilità di joystick-ng
         unsigned int slot;
         ioctl(jngfd, JNGIOCGETSLOT, &slot);
         
-        int dfd = open("dev/jng/device", O_RDWR);
+        int dfd = open("/dev/jng/device", O_RDWR);
         ioctl(dfd, JNGIOCSETSLOT, slot);
         ioctl(dfd, JNGIOCSETMODE, JNG_MODE_EVENT);
         
         int l1 = 0, l2 = 0, l3 = 0, l4 = 0;
+        char strres[256];
         
-        jngdsett_read("set_fixed_leds", &res);
-        if(res){ // Led fissi
+        if(res == 2){ // Led fissi
             jngdsett_read("fixed_leds", strres);
             l4 = strres[0] != '0';
             l3 = strres[1] != '0';
@@ -299,7 +311,7 @@ int main(int argc, char* argv[]){
         close(dfd);
     }
     
-    jngdsett_read("blink_leds", &leds_blink);
+    jngdsett_read("blink_leds", &blink_leds);
     
     // Mainloop!
     while(1){
@@ -347,12 +359,10 @@ int main(int argc, char* argv[]){
         
         write(jngfd, &state, sizeof(jng_state_t));
         
-        ds3_not_charging = report.cstate == 2;
-        
         // Passa da jng_feedback_t al joystick
         read(jngfd, &feedback, sizeof(jng_feedback_t));
         
-        ds3_set_feedback();
+        ds3_set_feedback(report.cstate);
         
         // Aspetta un po, per non sovraccaricare la CPU
         usleep(POLL_TIME_USEC);

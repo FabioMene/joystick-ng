@@ -1,5 +1,5 @@
 all:
-	gcc main.c -o ds3drv -L../../utils/libjngdsett -ljngdsett -lusb
+	gcc -Wall main.c -o ds3drv -L../../utils/libjngdsett -ljngdsett -lusb
 
 install:
 	install -m 755 ds3drv /usr/local/share/jng/drivers/ds3
