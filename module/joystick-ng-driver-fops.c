@@ -223,13 +223,14 @@ static int jng_driver_flush(struct file* fp, fl_owner_t id){
     // Non viene controllata la modalità in lettura
     // Se si è in lettura normale questo non avrà effetto
     
+    /* FIXME: Causa Kernel Oops in alcune circostanze
     // Cancella la coda degli eventi
     jng_queue_delall(&jng_connection_data->rbuffer);
     // Aggiorna le differenze
     jng_feedback_lock();
     memcpy(&jng_connection_data->tmpfeedback, &jng_connection_data->joystick->feedback, sizeof(jng_feedback_t));
     jng_feedback_unlock();
-    memcpy(&jng_connection_data->diff.feedback, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t));
+    memcpy(&jng_connection_data->diff.feedback, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t));*/
     return 0;
 }
 

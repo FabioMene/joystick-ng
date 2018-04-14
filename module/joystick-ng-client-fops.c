@@ -215,14 +215,14 @@ static unsigned int jng_client_poll(struct file* fp, poll_table* pt){
 static int jng_client_flush(struct file* fp, fl_owner_t id){
     // Non viene controllata la modalità in lettura
     // Se si è in lettura normale questo non avrà effetto
-    
+    /* FIXME: Causa Kernel Oops in alcune circostanze
     // Cancella la coda degli eventi
     jng_queue_delall(&jng_connection_data->rbuffer);
     // Aggiorna le differenze
     jng_state_rlock();
     memcpy(&jng_connection_data->tmpstate, &jng_connection_data->joystick->state, sizeof(jng_state_t));
     jng_state_runlock();
-    memcpy(&jng_connection_data->diff.state, &jng_connection_data->tmpstate, sizeof(jng_state_t));
+    memcpy(&jng_connection_data->diff.state, &jng_connection_data->tmpstate, sizeof(jng_state_t));*/
     return 0;
 }
 
