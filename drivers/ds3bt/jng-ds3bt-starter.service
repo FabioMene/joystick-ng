@@ -1,0 +1,11 @@
+[Unit]
+Description=ds3bt start helper
+After=bluetooth.service joystick-ng.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ds3bt_start
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

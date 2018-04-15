@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Setup the system and start ds3bt
+
+service bluetooth stop
+
+hciconfig hci0 up pscan
+
+jngdctl start ds3bt
