@@ -1,7 +1,7 @@
 /*
  * jngdsett.c
  * 
- * Copyright 2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2017-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -288,3 +288,9 @@ jngdsett_opt_t* jngdsett_optdata(int* num){
     return optdata;
 }
 
+void jngdsett_reset(){
+    free(optdata);
+    optdata = NULL;
+    optnum = NULL;
+    last_drv_name[0] = 0;
+}

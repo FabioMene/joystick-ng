@@ -1,7 +1,7 @@
 /*
- * jngdriverd.c
+ * jngd.c
  * 
- * Copyright 2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2017-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,45 +21,38 @@
  * 
  */
 
-// joystick-ng driver daemon
+// joystick-ng daemon
 // Questa utilità aiuta la programmazione di driver, in quanto fornisce
 // un modo unificato per gestire le preferenze e il lancio dei driver stessi
 // Tramite la libreria libjngdsett.so si può accedere alle preferenze
-// Per lanciare un driver si usa il comando jngdctl (vedi jngdctl.c), utile con udev (RUN+=)
+// Per lanciare un driver si usa il comando jngctl (vedi jngctl.c), utile con udev (RUN+=)
 
-// La comunicazione tra jngdctl e jngdriverd avviene tramite socket unix
+// La comunicazione tra jngctl e jngd avviene tramite socket unix
 // Il socket è /var/run/jngdriverd.socket
 
-#define SOCKET_FILE "/var/run/jngdriverd.socket"
-
-// Il pacchetto inviato è (lunghezza max 32768)
-//   1B  Lunghezza percorso programma (senza \0 finale)
-//   1B  Lunghezza percorso file di configurazione (senza \0)
-//   1B  Numero argomenti
-//   Percorso programma (terminato con \0)
-//   Percorso file config (terminato)
-//   Argomenti (terminati, non possono contenere altri \0)
-
-// Il demone lancia il driver specificato con jngdctl e gli passa tutti gli argomenti
-// Viene aggiunta la variabile d'ambiente JNG_DRIVER contentente il nome del driver
+// Il primo byte del pacchetto indica l'azione, da cui dipende la struttura del resto del pacchetto
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <syslog.h>
 #include <errno.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+
+#include "jngd.h"
 
 #define printi(fmt...) syslog(LOG_INFO,    fmt);
 #define printw(fmt...) syslog(LOG_WARNING, fmt);
 #define printe(fmt...) syslog(LOG_ERR,     fmt);
 
-char buffer[32768];
+unsigned char buffer[32768];
 
 int main(int argc, char* argv[]){
     // Demone standard
@@ -78,7 +71,7 @@ int main(int argc, char* argv[]){
     // Ignora l'handling dei processi figli (non diventeranno zombie)
     signal(SIGCHLD, SIG_IGN);
     
-    openlog("jngdriverd", LOG_CONS | LOG_PID, LOG_DAEMON);
+    openlog("jngd", LOG_CONS | LOG_PID, LOG_DAEMON);
     printi("Inizializzato");
     
     // Inizializza socket
@@ -97,8 +90,21 @@ int main(int argc, char* argv[]){
         return 1;
     }
     
+    // Imposta i permessi del socket
+    struct group* grp = getgrnam(SOCKET_GROUP);
+    if(!grp){
+        printw("Impossibile ottenere informazioni sul gruppo \"%s\"", SOCKET_GROUP);
+    } else {
+        // chown root:SOCKET_GROUP
+        chown(SOCKET_FILE, 0, grp->gr_gid);
+        chmod(SOCKET_FILE, 0660);
+    }
+    
+    unsigned char* packet = buffer + 1;
+    
     // Mainloop
     while(1){
+      _skip_to_recv:
         int len = recvfrom(sockfd, buffer, 32768, 0, NULL, NULL);
         if(len < 0){
             printe("Errore ricezione pacchetto (errno %d)", errno);
@@ -106,6 +112,49 @@ int main(int argc, char* argv[]){
             unlink(SOCKET_FILE);
             return 1;
         }
+        
+        if(len < 1){
+            printw("Pacchetto senza header (ed è di un solo byte)");
+            continue;
+        }
+        
+        len--;
+        
+        #define check_size(min) {int __min = (min); if(len < __min){printw("Lunghezza pacchetto richiesta: %d, ricevuta: %d", __min, len);goto _skip_to_recv;}}
+        
+        switch(buffer[0]){
+            case ACTION_DRV_LAUNCH: {
+                // Controlli pacchetti
+                check_size(2);
+                check_size(2 + packet[0] + packet[1]);
+                
+                // Sanity check
+                packet[2 + packet[0] - 1] = 0;
+                packet[2 + packet[0] - 1 + packet[1] - 1] = 0;
+                
+                int i, n;
+                
+                // Per caricare il percorso dell'eseguibile
+                jngdsett_load(packet + 2);
+                char exec_path[512];
+                jngdsett_read("exec", exec_path);
+                jngdsett_reset();
+                
+                // Creazione vettore argomenti
+                char** new_argv = NULL;
+                
+                char* last_start = packet + 2 + packet[0];
+                char* cursor = last_start
+                
+                for(i = 0, n = 0;i < packet[1];i++){
+                    
+                }
+                
+                
+                } break;
+        }
+        
+        
         if(len < 3){
             printw("Pacchetto malformato (non presenta l'header), scartato");
             continue;

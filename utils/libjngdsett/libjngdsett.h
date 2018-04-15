@@ -1,7 +1,7 @@
 /*
  * libjngdsett.h
  * 
- * Copyright 2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2017-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -63,8 +63,8 @@
 // collegamento successivo
 
 
-#ifndef LIBJNGDSETT
-#define LIBJNGDSETT 1
+#ifndef LIBJNGDSETT_H
+#define LIBJNGDSETT_H 1
 
 
 // Carica la configurazione
@@ -102,6 +102,9 @@ int jngdsett_write(char* opt, const char* val);
 
 // Ottiene il puntatore ai dati delle opzioni. Usato solo per ottenere informazioni
 jngdsett_opt_t* jngdsett_optdata(int* num);
+
+// Cancella i dati di sessione (permette di caricare le impostazioni d un altro driver)
+void jngdsett_reset();
 
 #endif
 
