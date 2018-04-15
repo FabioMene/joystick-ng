@@ -1,0 +1,10 @@
+[Unit]
+Description=joystick-ng driver daemon
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/jngdriverd
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

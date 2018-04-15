@@ -10,6 +10,7 @@ install:
 	install -m 644 50-joystick-ng.rules /etc/udev/rules.d/
 	make -C libjngdsett install
 	install -m 755 jngdctl /usr/local/bin/
+	make -C systemd install
 
 clean:
 	rm -f jngtest jngdriverd
@@ -21,3 +22,4 @@ uninstall:
 	rm -f /usr/local/bin/jngdriverd
 	make -C libjngdsett uninstall
 	rm -f /usr/local/bin/jngdctl
+	make -C systemd uninstall
