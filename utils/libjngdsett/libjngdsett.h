@@ -73,7 +73,9 @@
 // In caso di errore ritorna -1
 // Se fallisce l'analisi delle definizioni e/o delle impostazioni ritorna 1
 // altrimenti ritorna 0
+// load_onlydef non carica le impostazioni salvate, ma solo quelle predefinite
 int jngdsett_load(char* name);
+int jngdsett_load_onlydef(char* name);
 
 // Questa struttura viene usata internamente dalla libreria e da jngdctl
 typedef struct {

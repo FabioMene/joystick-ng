@@ -47,6 +47,7 @@
 #include <sys/un.h>
 
 #include "jngd.h"
+#include "libjngdsett/libjngdsett.h"
 
 #define printi(fmt...) syslog(LOG_INFO,    fmt);
 #define printw(fmt...) syslog(LOG_WARNING, fmt);
@@ -104,8 +105,10 @@ int main(int argc, char* argv[]){
     
     // Mainloop
     while(1){
+        int len;
+        
       _skip_to_recv:
-        int len = recvfrom(sockfd, buffer, 32768, 0, NULL, NULL);
+        len = recvfrom(sockfd, buffer, 32768, 0, NULL, NULL);
         if(len < 0){
             printe("Errore ricezione pacchetto (errno %d)", errno);
             close(sockfd);
@@ -130,72 +133,99 @@ int main(int argc, char* argv[]){
                 
                 // Sanity check
                 packet[2 + packet[0] - 1] = 0;
-                packet[2 + packet[0] - 1 + packet[1] - 1] = 0;
+                packet[2 + packet[0] + packet[1] - 1] = 0;
                 
                 int i, n;
                 
                 // Per caricare il percorso dell'eseguibile
-                jngdsett_load(packet + 2);
-                char exec_path[512];
-                jngdsett_read("exec", exec_path);
-                jngdsett_reset();
-                
-                // Creazione vettore argomenti
-                char** new_argv = NULL;
-                
-                char* last_start = packet + 2 + packet[0];
-                char* cursor = last_start
-                
-                for(i = 0, n = 0;i < packet[1];i++){
-                    
+                if(jngdsett_load((char*)packet + 2)){
+                    printe("[DRV_LAUNCH] Il driver \"%s\" non esiste", packet + 2);
+                    goto _skip_to_recv;
                 }
                 
+                char exec_path[512];
+                i = jngdsett_read("exec", exec_path);
                 
-                } break;
+                jngdsett_reset();
+                
+                if(i){
+                    printe("[DRV_LAUNCH] Il driver %s non ha exec", packet + 2);
+                    goto _skip_to_recv;
+                }
+                
+                // Creazione vettore argomenti
+                int argc = 2; // Minimo (eseguibile, NULL)
+                for(i = 2 + packet[0];i < len;i++){
+                    if(packet[i] == 0) argc++;
+                }
+                
+                char** new_argv = malloc(argc * sizeof(char*));
+                if(!new_argv){
+                    printe("[DRV_LAUNCH] Memoria esaurita");
+                    goto _skip_to_recv;
+                }
+                
+                new_argv[0] = exec_path;
+                
+                char* last = (char*)packet + 2 + packet[0];
+                for(i = 2 + packet[0], n = 1;i < len;i++){
+                    if(packet[i] == 0){
+                        new_argv[n++] = last;
+                        last = (char*)packet + i + 1;
+                    }
+                }
+                
+                new_argv[n] = NULL;
+                
+                // Creazione vettore variabili ambientali
+                char jng_driver_var[268] = "JNG_DRIVER=";
+                strcat(jng_driver_var, (char*)packet + 2);
+                
+                char* new_envp[] = {
+                    jng_driver_var, NULL
+                };
+        
+                // Esecuzione execve
+                printi("[DRV_LAUNCH] drv %s (%s)", packet + 2, exec_path);
+        
+                pid_t pid = fork();
+                if(pid < 0){
+                    printe("Impossibile eseguire fork()");
+                } else if(pid == 0){
+                    execve(exec_path, new_argv, new_envp);
+                    printe("Errore execve()");
+                    _Exit(1);
+                }
+                
+                free(new_argv);
+            } break;
+            
+            case ACTION_DRV_MODSETT: {
+                // Controllo pacchetti e sanity check
+                check_size(3);
+                check_size(3 + packet[0] + packet[1] + packet[2]);
+                
+                packet[3 + packet[0] - 1] = 0;
+                packet[3 + packet[0] + packet[1] - 1] = 0;
+                packet[3 + packet[0] + packet[1] + packet[2] - 1] = 0;
+                
+                // Carica il driver
+                if(jngdsett_load((char*)packet + 3)){
+                    printe("[DRV_MODSETT] Driver \"%s\" non trovato", packet + 3);
+                    goto _skip_to_recv;
+                }
+                
+                int res = jngdsett_write((char*)packet + 3 + packet[0], (char*)packet + 3 + packet[0] + packet[1]);
+                
+                jngdsett_reset();
+                
+                if(res){
+                    printe("[DRV_MODSETT] Scrittura fallita per il driver %s", packet + 3);
+                }
+            } break;
         }
         
-        
-        if(len < 3){
-            printw("Pacchetto malformato (non presenta l'header), scartato");
-            continue;
-        }
-        unsigned char eplen = (unsigned char)buffer[0];
-        unsigned char pplen = (unsigned char)buffer[1];
-        unsigned char arnum = (unsigned char)buffer[2];
-        if(len < (3 + eplen + pplen + arnum)){ // arnum conta solo gli \0 degli argomenti, non è accurato
-            printw("Pacchetto malformato (la lunghezza è inferiore a quella dichiarata), scartato");
-            continue;
-        }
-        char* executable_path = buffer + 3;
-        char  prefs_var[268] = "JNG_DRIVER=";
-        strncat(prefs_var, buffer + 3 + eplen + 1, pplen);
-        
-        char** new_argv = malloc(sizeof(char*) * (arnum + 2));
-        new_argv[0] = executable_path;
-        
-        int i   = 3 + eplen + 1 + pplen + 1;
-        int arg = 1;
-        while(arnum && i < 32767){
-            new_argv[arg++] = buffer + i;
-            if(!(--arnum)) break;
-            while(i < 32767 && buffer[i] != 0) i++;
-            i++;
-        }
-        new_argv[arg] = NULL;
-        
-        char* new_envp[] = { prefs_var, NULL };
-        
-        // Crea un nuovo processo
-        printi("Avvio %s...", executable_path);
-        
-        pid = fork();
-        if(pid < 0){
-            printe("Impossibile eseguire fork()");
-        } else if(pid == 0){
-            execve(executable_path, new_argv, new_envp);
-            printe("Errore execve()");
-            return 0;
-        }
+        #undef check_size
     }
     
     return 0;

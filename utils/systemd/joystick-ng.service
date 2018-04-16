@@ -1,9 +1,9 @@
 [Unit]
-Description=joystick-ng driver daemon
+Description=joystick-ng daemon
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/jngdriverd
+ExecStart=/usr/local/bin/jngd
 RemainAfterExit=true
 
 [Install]
