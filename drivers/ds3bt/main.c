@@ -33,6 +33,7 @@
 #include <syslog.h>
 #include <pthread.h>
 #include <signal.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hidp.h>
@@ -370,11 +371,19 @@ int client_loop(int ctrl, int intr){
         printw("Impossibile avviare il sender thread, no feedback disponibile");
     }
     
+    int timeout;
+    jngdsett_read("timeout", &timeout);
+    
+    time_t disconnect_time = time(NULL) + timeout;
+    
     // Mainloop!
     while(1){
         if(recv(intr, buffer, 50, 0) != 50) break;
         // HID Data, Input (0xa1) Protocol code: keyboard (0x01) 
         if(!(buffer[0] == 0xa1 && buffer[1] == 0x01)) break;
+        
+        time_t now = time(NULL);
+        
         // HID Modifiers: 0
         if(buffer[2] == 0x00){
             memcpy(&report, buffer + 1, sizeof(ds3_report_t));
@@ -425,8 +434,16 @@ int client_loop(int ctrl, int intr){
             
             write(jngfd, &state, sizeof(jng_state_t));
             
-            // Aspetta un po, per non sovraccaricare la CPU
-            // usleep(POLL_TIME_USEC);
+            // Controllo timeout
+            if(timeout){
+                if(state.keys != 0) disconnect_time = now + timeout;
+                if(disconnect_time < now){
+                    printi("Disconnessione per inattività");
+                    close(ctrl);
+                    close(intr);
+                    return 0;
+                }
+            }
         }
     }
     printe("Connessione persa");

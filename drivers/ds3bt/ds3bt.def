@@ -8,3 +8,5 @@ set_leds   = int    | 1  | Se 0 non vengono impostati led dal driver (solo feedb
 fixed_leds = string |0001| Questa stringa indica i led fissi, dal quarto al primo
 
 blink_leds = int    | 1  | Se impostato a 1 fa lampeggiare i led se il controller si sta caricando o se è scarico
+
+timeout    = int    |300 | Se diverso da 0 indica i secondi di inattività prima che il joystick si spenga
