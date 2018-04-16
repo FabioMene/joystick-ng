@@ -3,7 +3,7 @@ all:
 	
 	make -C libjngdsett
 	
-	gcc -Wall jngd.c -o jngd
+	gcc -Wall jngd.c -o jngd -Llibjngdsett -ljngdsett
 	gcc -Wall jngctl.c -o jngctl -Llibjngdsett -ljngdsett
 
 install:

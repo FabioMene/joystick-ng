@@ -198,6 +198,20 @@ int jngdsett_load(char* name){
     return dirty;
 }
 
+int jngdsett_load_onlydef(char* name){
+    // Ottieni il nome
+    if(name == NULL){
+        name = getenv("JNG_DRIVER");
+        if(name == NULL) return -1;
+    }
+    strncpy(last_drv_name, name, 1023);
+    
+    // Carica le definizioni
+    char path[1024];
+    strcpy(path, "/etc/jngd/defs/");
+    strncat(path, name, 1023);
+    return _analyze_file(path, _analyze_def_line);
+}
 
 int jngdsett_read(char* opt, void* dest){
     // Cerca l'opzione
@@ -291,6 +305,6 @@ jngdsett_opt_t* jngdsett_optdata(int* num){
 void jngdsett_reset(){
     free(optdata);
     optdata = NULL;
-    optnum = NULL;
+    optnum = 0;
     last_drv_name[0] = 0;
 }

@@ -29,7 +29,7 @@ clean:
 	make -C utils clean
 	make -C drivers clean
 
-uninstall: module-uninstall utils-uninstall -drivers-uninstall
+uninstall: module-uninstall utils-uninstall drivers-uninstall
 
 module-uninstall:
 	make -C module uninstall
