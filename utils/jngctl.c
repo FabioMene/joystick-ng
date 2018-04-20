@@ -133,7 +133,7 @@ int main(int argc, char* argv[]){
                 arg_start += strlen(argv[i]) + 1;
             }
             
-            packet[1] = arg_start - 2 - buffer[0];
+            packet[1] = arg_start - 2 - packet[0];
             
             jngd_connect();
             jngd_send(buffer, 1+ 2 + packet[0] + packet[1]);
