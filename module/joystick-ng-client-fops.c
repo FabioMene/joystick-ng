@@ -239,10 +239,10 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
     
     switch(cmd){
         case JNGIOCSETSLOT:
-            // Cambia joystick, resetta le code, imposta la rotta, accendi i circuiti temporali...
-            // Anzi no, cambia solo joystick dato che la coda di differenza serve comunque
             if(arg < 0 || arg > JNG_TOT - 1) return -EINVAL; // Sta cercando di fotterci questo
             jng_connection_data->joystick = jng_joysticks + arg;
+            // Permetti la rigenerazione di tutti gli eventi cancellando le differenze
+            memset(&jng_connection_data->diff.state, 0, sizeof(jng_state_t));
             return 0;
         
         case JNGIOCGETSLOT:

@@ -309,6 +309,9 @@ typedef struct {
 // Imposta lo slot da cui si vuole leggere (C)
 // Questo permette di selezionare il primo, secondo, ..., o trentaduesimo joystick (normalmente la prima chiamata dopo open)
 // Se non eseguita read, write e le altre ioctl restituiranno errore
+// Cambiando slot o cambiando modalità di lettura da normale ad eventi vengono rigenerati
+// e messi in coda di lettura tutti gli eventi, come se lo stato precedente fosse non collegato.
+// La coda può essere svuotata in qualsiasi momento chiamando flush()
 #define JNGIOCSETSLOT _IOW(JNG_IOCTL_TYPE, 0x00, unsigned int)
 
 
@@ -334,9 +337,8 @@ typedef struct {
 //     C: jng_feedback_t
 //     D: jng_state_t
 // Per le modalità ad eventi sia C che D leggono e scrivono jng_event_t
-// Cambiando modalità di lettura da normale ad eventi vengono rigenerati e messi in coda di lettura
-// tutti gli eventi. La coda può essere svuotata in qualsiasi momento chiamando flush()
 // Trovatemi un modulo più flessibile di questo
+// Vedi anche: JNGIOCSETSLOT
 #define JNGIOCSETMODE _IOW(JNG_IOCTL_TYPE, 0x02, unsigned int)
 
 // Ottiene la modalità impostata (CD)
