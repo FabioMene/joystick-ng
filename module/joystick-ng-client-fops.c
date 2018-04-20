@@ -246,6 +246,7 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
             return 0;
         
         case JNGIOCGETSLOT:
+            if(jng_connection_data->joystick == NULL) return -EINVAL;
             return copy_to_user((unsigned int*)arg, &jng_connection_data->joystick->num, sizeof(unsigned int)) ? -EFAULT : 0;
         
         
