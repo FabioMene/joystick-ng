@@ -233,7 +233,10 @@ static int jng_del_unwanted_events_cb(void* el, void* arg){
 static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long arg){
     int rc;
     
-    printi("ioctl client: %d(%ld)", cmd, arg);
+    // Evita di spammare messaggi di log per la selezione joystick, dato che tecnicamente
+    // si possono leggere i dati di tutti e 32 i joystick da un solo fd
+    if(cmd != JNGIOCSETSLOT) printi("ioctl client: %d(%ld)", cmd, arg);
+    
     switch(cmd){
         case JNGIOCSETSLOT:
             // Cambia joystick, resetta le code, imposta la rotta, accendi i circuiti temporali...
