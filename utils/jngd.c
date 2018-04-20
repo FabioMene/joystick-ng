@@ -55,6 +55,15 @@
 
 unsigned char buffer[32768];
 
+int sockfd = -1;
+
+void sigterm_handler(int sig){
+    close(sockfd);
+    unlink(SOCKET_FILE);
+    printw("Uscita causata da SIGTERM");
+    exit(0);
+}
+
 int main(int argc, char* argv[]){
     // Demone standard
     int pid = fork();
@@ -72,11 +81,14 @@ int main(int argc, char* argv[]){
     // Ignora l'handling dei processi figli (non diventeranno zombie)
     signal(SIGCHLD, SIG_IGN);
     
+    // In caso jngd venga terminato (da systemd per esempio, service joystick-ng stop)
+    signal(SIGTERM, sigterm_handler);
+    
     openlog("jngd", LOG_CONS | LOG_PID, LOG_DAEMON);
     printi("Inizializzato");
     
     // Inizializza socket
-    int sockfd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    sockfd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if(sockfd < 0){
         printe("Impossibile inizializzare il socket");
         return 1;

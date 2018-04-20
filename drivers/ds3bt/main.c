@@ -52,7 +52,7 @@
 
 
 #define PID_FILE "/var/run/ds3bt.pid"
-#define POLL_TIME_USEC 5000 // 5ms
+#define FEEDBACK_POLL_TIME_USEC 5000 // 5ms
 
 
 #define L2CAP_PSM_HIDP_CTRL 0x11
@@ -116,6 +116,16 @@ typedef struct {
     unsigned char blevel;
 } sender_thread_arg_t;
 
+void server_sigterm_handler(int sig){
+    unlink(PID_FILE);
+    printw("SIGTERM, Uscita...");
+    exit(0);
+}
+
+void client_sigterm_handler(int sig){
+    _Exit(0);
+}
+
 int main(int argc, char* argv[]){
     // Apri log
     openlog("jngd/ds3bt", LOG_CONS | LOG_PID, LOG_DAEMON);
@@ -123,13 +133,14 @@ int main(int argc, char* argv[]){
     
     jngdsett_load(NULL);
     
+    int autostart = 0;
+    jngdsett_read("autostart", &autostart);
+    
     int fd;
     
     if(argc > 1){
-        int res;
-        jngdsett_read("autostart", &res);
-        if(strcmp(argv[1], "autostart") == 0 && res == 0){
-            printi("Autostart ignorato");
+        if(strcmp(argv[1], "autostart") == 0 && autostart == 0){
+            printi("Autostart ignorato (da impostazioni)");
             return 0;
         }
         // Ferma il server
@@ -160,7 +171,11 @@ int main(int argc, char* argv[]){
     
     fd = open(PID_FILE, O_WRONLY | O_CREAT | O_EXCL);
     if(fd < 0){
-        printe("Impossibile creare il pidfile. Server già avviato?");
+        if(autostart){
+            printi("Autostart ignorato (server già avviato)");
+        } else {
+            printe("Impossibile creare il pidfile. Server già avviato?");
+        }
         return 1;
     } else {
         char buffer[512];
@@ -172,6 +187,9 @@ int main(int argc, char* argv[]){
             unlink(PID_FILE);
         }
     }
+    
+    // Handling di SIGTERM
+    signal(SIGTERM, server_sigterm_handler);
     
     // Avvia server bluetooth
     bdaddr_t bdaddr;
@@ -278,6 +296,9 @@ short get_threshold(char val){
 }
 
 int client_loop(int ctrl, int intr){
+    // Imposta il signal handler di SIGTERM per questo processo
+    signal(SIGTERM, client_sigterm_handler);
+    
     // Ricarica la configurazione (per questo client)
     jngdsett_load(NULL);
     
@@ -482,7 +503,7 @@ void* sender_thread_loop(void* varg){
                 changed = 0;
             }
             
-            usleep(POLL_TIME_USEC);
+            usleep(FEEDBACK_POLL_TIME_USEC);
             continue;
         }
         

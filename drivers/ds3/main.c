@@ -34,6 +34,7 @@
 #include "../../include/joystick-ng.h"
 #include "../../utils/libjngdsett/libjngdsett.h"
 
+#define printd(fmt...) syslog(LOG_DEBUG,   fmt);
 #define printi(fmt...) syslog(LOG_INFO,    fmt);
 #define printw(fmt...) syslog(LOG_WARNING, fmt);
 #define printe(fmt...) syslog(LOG_ERR,     fmt);
@@ -155,11 +156,12 @@ short get_threshold(char val){
 
 int main(int argc, char* argv[]){
     if(argc != 3){
-        printf("Uso: %s busid devid\nQuesto programma non andrebbe chiamato direttamente ma tramite jngdctl\n", argv[0]);
+        printf("Uso: %s busid devid\nQuesto programma non andrebbe chiamato direttamente ma tramite jngctl\n", argv[0]);
         return 1;
     }
     
     openlog("jngd/ds3", LOG_CONS | LOG_PID, LOG_DAEMON);
+    
     printi("Init: %s %s", argv[1], argv[2]);
     
     int busid, devid;
@@ -236,12 +238,15 @@ int main(int argc, char* argv[]){
                 break;
         }
         if(set_mac){
+            printd("Impostazione master mac a %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
             char msg[8]= {
                 0x01, 0x00,
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
             };
             usb_ret = usb_control_msg(handle, USB_ENDPOINT_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE, 0x09, 0x03f5, 0, msg, sizeof(msg), 5000);
-            if(usb_ret < 0) printw("set_master fallito: %d\n", usb_ret);
+            if(usb_ret < 0) printw("set_master fallito: %d", usb_ret);
+        } else {
+            printw("Impossibile trovare un mac valido per l'impostazione set_master_mac");
         }
     }
     
