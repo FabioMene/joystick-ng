@@ -150,7 +150,7 @@ int main(int argc, char* argv[]){
                 int i, n;
                 
                 // Per caricare il percorso dell'eseguibile
-                if(jngdsett_load((char*)packet + 2)){
+                if(jngdsett_load((char*)packet + 2) < 0){
                     printe("[DRV_LAUNCH] Il driver \"%s\" non esiste", packet + 2);
                     goto _skip_to_recv;
                 }
