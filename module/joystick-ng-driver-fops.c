@@ -83,48 +83,57 @@ static int jng_driver_open(struct inode* in, struct file* fp){
     #undef _open_fail
 }
 
-static void jng_drv_gen_ev(jng_connection_t* conn, unsigned short type, unsigned int what, int val){
-    conn->tmpevent.type  = type;
-    conn->tmpevent.what  = what;
-    conn->tmpevent.value = val;
-    jng_queue_add(&conn->rbuffer, &conn->tmpevent);
+static int jng_update_driver_incremental(jng_connection_t* conn){
+    int return_val = -1;
+    
+    jng_feedback_lock(conn);
+    if(conn->r_inc != conn->joystick->feedback_inc){
+        memcpy(&conn->tmpfeedback, &conn->joystick->feedback, sizeof(jng_feedback_t));
+        return_val = 1;
+        conn->r_inc = conn->joystick->feedback_inc;
+    }
+    jng_feedback_unlock(conn);
+    
+    return return_val;
+}
+
+static void jng_gen_driver_events(jng_connection_t* conn){
+    // Questa macro evita 5000000 milioni di if
+    #define jng_diff_cmp(_prop, _type, _what) if(conn->diff.feedback._prop != conn->tmpfeedback._prop) jng_add_event(conn, _type, _what, conn->tmpfeedback._prop)
+    
+    // Force feedback
+    if(conn->evmask & JNG_EV_FB_FORCE){
+        jng_diff_cmp(force.bigmotor,    JNG_EV_FB_FORCE, JNG_FB_FORCE_BIGMOTOR);
+        jng_diff_cmp(force.smallmotor,  JNG_EV_FB_FORCE, JNG_FB_FORCE_SMALLMOTOR);
+        jng_diff_cmp(force.extramotor1, JNG_EV_FB_FORCE, JNG_FB_FORCE_EXTRAMOTOR1);
+        jng_diff_cmp(force.extramotor2, JNG_EV_FB_FORCE, JNG_FB_FORCE_EXTRAMOTOR2);
+    }
+    
+    if(conn->evmask & JNG_EV_FB_LED){
+        jng_diff_cmp(leds.led1, JNG_EV_FB_LED, JNG_FB_LED_1);
+        jng_diff_cmp(leds.led2, JNG_EV_FB_LED, JNG_FB_LED_2);
+        jng_diff_cmp(leds.led3, JNG_EV_FB_LED, JNG_FB_LED_3);
+        jng_diff_cmp(leds.led4, JNG_EV_FB_LED, JNG_FB_LED_4);
+    }
+    
+    #undef jng_diff_cmp
+    
+    // Aggiornamento diff
+    memcpy(&conn->diff.feedback, &conn->tmpfeedback, sizeof(jng_feedback_t));
 }
 
 static ssize_t jng_driver_read(struct file* fp, char __user* buffer, size_t len, loff_t* offp){
     if(jng_connection_data->mode & JNG_RMODE_EVENT){
-        // Indica se i dati vanno elaborati (non è detto che ci siano differenze)
-        int newdata;
+        // Modalità ad eventi
         
         if(len < sizeof(jng_event_t)) return -EINVAL;
         
       jng_drv_rd_read_again:
-        newdata = 0;
-        // Copia nella cache e aggiorna l'incrementale
-        jng_feedback_lock();
-        if(jng_connection_data->r_inc != jng_connection_data->joystick->feedback_inc){
-            memcpy(&jng_connection_data->tmpfeedback, &jng_connection_data->joystick->feedback, sizeof(jng_feedback_t));
-            newdata = 1;
-            jng_connection_data->r_inc = jng_connection_data->joystick->feedback_inc;
-        }
-        jng_feedback_unlock();
         
-        // Elabora i dati
-        if(newdata){
-            // Trova le differenze
-            #define jng_drv_rd_cmp(prop, type, what) if((jng_connection_data->evmask & type) != 0 && jng_connection_data->diff.feedback.prop != jng_connection_data->tmpfeedback.prop) jng_drv_gen_ev(jng_connection_data, type, what, jng_connection_data->tmpfeedback.prop);
-            
-            jng_drv_rd_cmp(force.bigmotor,    JNG_EV_FB_FORCE, JNG_FB_FORCE_BIGMOTOR);
-            jng_drv_rd_cmp(force.smallmotor,  JNG_EV_FB_FORCE, JNG_FB_FORCE_SMALLMOTOR);
-            jng_drv_rd_cmp(force.extramotor1, JNG_EV_FB_FORCE, JNG_FB_FORCE_EXTRAMOTOR1);
-            jng_drv_rd_cmp(force.extramotor2, JNG_EV_FB_FORCE, JNG_FB_FORCE_EXTRAMOTOR2);
-            
-            jng_drv_rd_cmp(leds.led1, JNG_EV_FB_LED, JNG_FB_LED_1);
-            jng_drv_rd_cmp(leds.led2, JNG_EV_FB_LED, JNG_FB_LED_2);
-            jng_drv_rd_cmp(leds.led3, JNG_EV_FB_LED, JNG_FB_LED_3);
-            jng_drv_rd_cmp(leds.led4, JNG_EV_FB_LED, JNG_FB_LED_4);
-            
-            // Aggiornamento differenze
-            memcpy(&jng_connection_data->diff.feedback, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t));
+        // Controlla se lo stato feedback è cambiato dall'ultimo controllo,
+        // e se sì, genera eventuali nuovi eventi
+        if(jng_update_driver_incremental(jng_connection_data) == 0){
+            jng_gen_driver_events(jng_connection_data);
         }
         
         // È possibile che non ci sia nessun evento, in tal caso controlla cosa fare
@@ -139,13 +148,14 @@ static ssize_t jng_driver_read(struct file* fp, char __user* buffer, size_t len,
         // copiamolo in user space e ritorniamo
         return copy_to_user(buffer, &jng_connection_data->tmpevent, sizeof(jng_event_t)) ? -EFAULT : sizeof(jng_event_t);
     }
+    
     // Mod normale se arriviamo qui
     if(len < sizeof(jng_feedback_t)) return -EINVAL;
     // copy_to_user può andare in sleep, ergo non si può usare con uno spinlock bloccato
     // La procedura è fblock --> joystick->tmp --> fbunlock --> tmp->user
-    jng_feedback_lock();
+    jng_feedback_lock(jng_connection_data);
     memcpy(&jng_connection_data->tmpfeedback, &jng_connection_data->joystick->feedback, sizeof(jng_feedback_t));
-    jng_feedback_unlock();
+    jng_feedback_unlock(jng_connection_data);
     return copy_to_user(buffer, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t)) ? -EFAULT : sizeof(jng_feedback_t);
 }
 
@@ -156,9 +166,9 @@ static ssize_t jng_driver_write(struct file* fp, const char __user* buffer, size
         
         // Solo un driver è collegato ad un dato joystick in un dato momento, ergo non crea problemi l'uso di
         // rlock --> joystick->cache --> runlock --> aggiornamento --> wlock --> cache->joystick --> wunlock --> return 
-        jng_state_rlock();
+        jng_state_rlock(jng_connection_data);
         memcpy(&jng_connection_data->tmpstate, &jng_connection_data->joystick->state, sizeof(jng_state_t));
-        jng_state_runlock();
+        jng_state_runlock(jng_connection_data);
         
         switch(jng_connection_data->tmpevent.type){
             case JNG_EV_KEY:
@@ -180,10 +190,10 @@ static ssize_t jng_driver_write(struct file* fp, const char __user* buffer, size
                 JNG_SENSOR(jng_connection_data->tmpstate, jng_connection_data->tmpevent.what) = jng_connection_data->tmpevent.value;
                 break;
         }
-        jng_state_wlock();
+        jng_state_wlock(jng_connection_data);
         memcpy(&jng_connection_data->joystick->state, &jng_connection_data->tmpstate, sizeof(jng_state_t));
         jng_connection_data->joystick->state_inc++;
-        jng_state_wunlock();
+        jng_state_wunlock(jng_connection_data);
         
         wake_up_interruptible(&jng_connection_data->joystick->state_queue);
         
@@ -195,10 +205,10 @@ static ssize_t jng_driver_write(struct file* fp, const char __user* buffer, size
     // quindi la procedura è user->tmp --> wlock --> tmp->joystick --> wunlock
     if(copy_from_user(&jng_connection_data->tmpstate, buffer, sizeof(jng_state_t)) != 0) return -EFAULT;
     jng_connection_data->tmpstate.connected = 1;
-    jng_state_wlock();
+    jng_state_wlock(jng_connection_data);
     memcpy(&jng_connection_data->joystick->state, &jng_connection_data->tmpstate, sizeof(jng_state_t));
     jng_connection_data->joystick->state_inc++;
-    jng_state_wunlock();
+    jng_state_wunlock(jng_connection_data);
     wake_up_interruptible(&jng_connection_data->joystick->state_queue);
     return sizeof(jng_state_t);
 }
@@ -214,23 +224,36 @@ static unsigned int jng_driver_poll(struct file* fp, poll_table* pt){
     // Controlla la mod di lettura
     // In mod eventi se c'è almeno un evento in coda ritorna "leggibile"
     if(jng_connection_data->mode & JNG_RMODE_EVENT){
-        if(jng_queue_len(&jng_connection_data->rbuffer)) mask |= POLLIN | POLLRDNORM;
-    } else  mask |= POLLIN | POLLRDNORM;
+        // In modalità eventi fa gli stessi controlli di read()
+        // e ritorna POLLIN solo se c'è almeno un evento
+        
+        if(jng_update_driver_incremental(jng_connection_data) == 0){
+            jng_gen_driver_events(jng_connection_data);
+        }
+        
+        if(jng_queue_len(&jng_connection_data->rbuffer) != 0){
+            mask |= POLLIN | POLLRDNORM;
+        }
+    } else {
+        // In mod normale la lettura non blocca mai
+        mask |= POLLIN | POLLRDNORM;
+    }
+    
     return mask;
 }
 
-static int jng_driver_flush(struct file* fp, fl_owner_t id){
+static int jng_driver_fsync(struct file* fp, loff_t start, loff_t end, int datasync){
     // Non viene controllata la modalità in lettura
     // Se si è in lettura normale questo non avrà effetto
     
-    /* FIXME: Causa Kernel Oops in alcune circostanze
     // Cancella la coda degli eventi
     jng_queue_delall(&jng_connection_data->rbuffer);
-    // Aggiorna le differenze
-    jng_feedback_lock();
+    
+    // Aggiorna le differenze. Non è necessario controllare ->joystick, dato che viene assegnato dal kernel in open()
+    jng_feedback_lock(jng_connection_data);
     memcpy(&jng_connection_data->tmpfeedback, &jng_connection_data->joystick->feedback, sizeof(jng_feedback_t));
-    jng_feedback_unlock();
-    memcpy(&jng_connection_data->diff.feedback, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t));*/
+    jng_feedback_unlock(jng_connection_data);
+    memcpy(&jng_connection_data->diff.feedback, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t));
     return 0;
 }
 
@@ -251,16 +274,16 @@ static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
         
         
         case JNGIOCSETINFO:
-            jng_state_wlock();
+            jng_state_wlock(jng_connection_data);
             rc = copy_from_user(&jng_connection_data->joystick->info, (jng_info_t*)arg, sizeof(jng_info_t));
             jng_connection_data->joystick->info.connected = 1;
-            jng_state_wunlock();
+            jng_state_wunlock(jng_connection_data);
             return rc ? -EFAULT : 0;
         
         case JNGIOCGETINFO: // Perchè un driver dovrebbe volere le sue info? mah
-            jng_state_rlock();
+            jng_state_rlock(jng_connection_data);
             rc = copy_to_user((jng_info_t*)arg, &jng_connection_data->joystick->info, sizeof(jng_info_t));
-            jng_state_runlock();
+            jng_state_runlock(jng_connection_data);
             return rc ?-EFAULT : 0;
         
         case JNGIOCSETMODE:
@@ -316,7 +339,7 @@ struct file_operations joystick_ng_driver_fops = {
     
     .read           = jng_driver_read,
     .poll           = jng_driver_poll,
-    .flush          = jng_driver_flush,
+    .fsync          = jng_driver_fsync,
     .write          = jng_driver_write,
     
     .unlocked_ioctl = jng_driver_ioctl,

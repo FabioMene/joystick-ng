@@ -88,8 +88,10 @@ typedef struct {
     
     // Roba termporanea (gestione eventi)
     // Queste cache servono per tenere liberi gli spinlock
-    jng_state_t     tmpstate;
-    jng_feedback_t  tmpfeedback;
+    union {
+        jng_state_t     tmpstate;
+        jng_feedback_t  tmpfeedback;
+    };
     jng_event_t     tmpevent;
     
     // Queste strutture servono per generare gli eventi (diff)
@@ -114,13 +116,13 @@ typedef struct {
 // Scorciatoie tattica, da usare in joystick-ng-{driver,client}-fops.c dove struct file* fp è definito
 #define jng_connection_data    ((jng_connection_t*)fp->private_data)
 
-#define jng_state_rlock()     read_lock(&jng_connection_data->joystick->state_lock);
-#define jng_state_runlock()   read_unlock(&jng_connection_data->joystick->state_lock);
-#define jng_state_wlock()     write_lock(&jng_connection_data->joystick->state_lock);
-#define jng_state_wunlock()   write_unlock(&jng_connection_data->joystick->state_lock);
+#define jng_state_rlock(conn)     read_lock(&conn->joystick->state_lock);
+#define jng_state_runlock(conn)   read_unlock(&conn->joystick->state_lock);
+#define jng_state_wlock(conn)     write_lock(&conn->joystick->state_lock);
+#define jng_state_wunlock(conn)   write_unlock(&conn->joystick->state_lock);
 
-#define jng_feedback_lock()   spin_lock(&jng_connection_data->joystick->feedback_lock);
-#define jng_feedback_unlock() spin_unlock(&jng_connection_data->joystick->feedback_lock);
+#define jng_feedback_lock(conn)   spin_lock(&conn->joystick->feedback_lock);
+#define jng_feedback_unlock(conn) spin_unlock(&conn->joystick->feedback_lock);
 
 // Variabili globali esterne
 
@@ -131,6 +133,15 @@ extern struct file_operations joystick_ng_client_fops;
 // I joystick
 extern jng_joystick_t jng_joysticks[JNG_TOT];
 extern spinlock_t     jng_joysticks_lock;
+
+
+// Aggiunge un evento sulla coda di lettura
+static inline void jng_add_event(jng_connection_t* conn, unsigned short type, unsigned int what, int val){
+    conn->tmpevent.type  = type;
+    conn->tmpevent.what  = what;
+    conn->tmpevent.value = val;
+    jng_queue_add(&conn->rbuffer, &conn->tmpevent);
+}
 
 #endif
 

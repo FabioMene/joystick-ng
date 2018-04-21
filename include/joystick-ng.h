@@ -311,7 +311,7 @@ typedef struct {
 // Se non eseguita read, write e le altre ioctl restituiranno errore
 // Cambiando slot o cambiando modalità di lettura da normale ad eventi vengono rigenerati
 // e messi in coda di lettura tutti gli eventi, come se lo stato precedente fosse non collegato.
-// La coda può essere svuotata in qualsiasi momento chiamando flush()
+// La coda può essere svuotata in qualsiasi momento chiamando fsync()
 #define JNGIOCSETSLOT _IOW(JNG_IOCTL_TYPE, 0x00, unsigned int)
 
 
