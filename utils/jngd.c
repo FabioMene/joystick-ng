@@ -222,7 +222,7 @@ int main(int argc, char* argv[]){
                 packet[3 + packet[0] + packet[1] + packet[2] - 1] = 0;
                 
                 // Carica il driver
-                if(jngdsett_load((char*)packet + 3)){
+                if(jngdsett_load((char*)packet + 3) < 0){
                     printe("[DRV_MODSETT] Driver \"%s\" non trovato", packet + 3);
                     goto _skip_to_recv;
                 }

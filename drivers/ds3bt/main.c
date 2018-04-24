@@ -100,8 +100,8 @@ typedef struct {
     unsigned char      X;
     unsigned char      res4[3];
     unsigned char      cstate; // non 3: in carica, 3: non in carica
-    unsigned char      blevel; // 238: in carica (livello non disponibile), 0 -> 5: 0 -> 100%
-    unsigned char      conn; // usb/bluetooth?
+    unsigned char      blevel; // 238: in carica (livello non disponibile), 0 -> 5: 0 -> 100% // TODO: Fare chiarezza sul livello di carica 
+    unsigned char      conn; // 0x16: bluetooth, 0x12: usb (?) TODO: Implementare la disconnessione quando il joystick segnala che è connesso tramite USB
     unsigned char      res5[9];
     unsigned short int accelX;
     unsigned short int accelY;

@@ -89,7 +89,7 @@ static int jng_update_driver_incremental(jng_connection_t* conn){
     jng_feedback_lock(conn);
     if(conn->r_inc != conn->joystick->feedback_inc){
         memcpy(&conn->tmpfeedback, &conn->joystick->feedback, sizeof(jng_feedback_t));
-        return_val = 1;
+        return_val = 0;
         conn->r_inc = conn->joystick->feedback_inc;
     }
     jng_feedback_unlock(conn);
