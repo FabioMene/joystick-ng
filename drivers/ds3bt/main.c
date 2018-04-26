@@ -99,9 +99,9 @@ typedef struct {
     unsigned char      A;
     unsigned char      X;
     unsigned char      res4[3];
-    unsigned char      cstate; // non 3: in carica, 3: non in carica
+    unsigned char      cstate; // 2: in carica, 3: non in carica (?)
     unsigned char      blevel; // 238: in carica (livello non disponibile), 0 -> 5: 0 -> 100% // TODO: Fare chiarezza sul livello di carica 
-    unsigned char      conn; // 0x16: bluetooth, 0x12: usb (?) TODO: Implementare la disconnessione quando il joystick segnala che è connesso tramite USB
+    unsigned char      conn; // 0x16: bluetooth, 0x12: usb (?)
     unsigned char      res5[9];
     unsigned short int accelX;
     unsigned short int accelY;
@@ -252,9 +252,6 @@ int main(int argc, char* argv[]){
                 close(intserv);
                 // Esegui il client mainloop
                 int res = client_loop(ctrlsock, intsock);
-                // Chiudi i socket con il joystick
-                close(ctrlsock);
-                close(intsock);
                 _Exit(res);
             } else {
                 printi("Processo client avviato");
@@ -270,8 +267,8 @@ int main(int argc, char* argv[]){
 }
 
 char ds3_control_packet_template[50]={
-    0x52, // SET_REPORT, Output
-    0X01, 0x00,
+    0x52, 0X01, // SET_REPORT, Output
+    0x00,
     0xff, 0x00, // Small Act (Timeout, activation)
     0xff, 0x00, // Big Act (Timeout, force)
     0x00, 0x00, 0x00, 0x00,
@@ -392,10 +389,16 @@ int client_loop(int ctrl, int intr){
         printw("Impossibile avviare il sender thread, no feedback disponibile");
     }
     
-    int timeout;
-    jngdsett_read("timeout", &timeout);
+    int timeout, ps_shutdown;
+    jngdsett_read("timeout",     &timeout);
+    jngdsett_read("ps_shutdown", &ps_shutdown);
     
-    time_t disconnect_time = time(NULL) + timeout;
+    // Per i casi di disconnessione
+    time_t inactivity_time = time(NULL) + timeout;
+    time_t ps_sd_time = time(NULL) + ps_shutdown;
+    
+    int should_close = 0;
+    char* close_cause = "";
     
     // Mainloop!
     while(1){
@@ -455,19 +458,45 @@ int client_loop(int ctrl, int intr){
             
             write(jngfd, &state, sizeof(jng_state_t));
             
-            // Controllo timeout
-            if(timeout){
-                if(state.keys != 0) disconnect_time = now + timeout;
-                if(disconnect_time < now){
-                    printi("Disconnessione per inattività");
-                    close(ctrl);
-                    close(intr);
-                    return 0;
+            // Controllo ps_shutdown
+            if(ps_shutdown){
+                if(report.ps == 0) ps_sd_time = now + ps_shutdown;
+                if(ps_sd_time < now){
+                    should_close = 1;
+                    close_cause  = "Tasto PS premuto per più di ps_timeout secondi";
                 }
             }
+            
+            // Controllo stato connessione
+            if(report.conn != 0x16){
+                should_close = 1;
+                close_cause  = "Il joystick sta passando in modalità USB";
+            }
+        }
+        
+        // Controllo timeout
+        if(timeout){
+            if(state.keys != 0) inactivity_time = now + timeout;
+            if(inactivity_time < now){
+                should_close = 1;
+                close_cause  = "inattività";
+            }
+        }
+            
+        if(should_close){
+            break;
         }
     }
-    printe("Connessione persa");
+    
+    if(should_close){
+        printi("Disconnessione: %s", close_cause);
+    } else {
+        printe("Connessione persa");
+    }
+    
+    close(jngfd);
+    close(ctrl);
+    close(intr);
     return 0;
 }
 
@@ -563,7 +592,7 @@ void* sender_thread_loop(void* varg){
             if(arg->blevel == 238){ // In carica
                 Ton  = 0x40;
                 Toff = 0x40;
-            } else if(arg->blevel <= 1){ // Scarico
+            } else if(arg->blevel <= 2){ // Scarico
                 Ton  = 0x10;
                 Toff = 0x10;
             }

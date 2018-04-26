@@ -85,7 +85,7 @@ typedef struct {
     unsigned char      A;
     unsigned char      X;
     unsigned char      res4[3];
-    unsigned char      cstate; // non 3: in carica, 3: non in carica
+    unsigned char      cstate; // 2: in carica, 3: non in carica
     unsigned char      blevel; // 238: in carica (livello non disponibile), 0 -> 5: 0 -> 100%
     unsigned char      conn; // usb/bluetooth?
     unsigned char      res5[9];
@@ -134,10 +134,10 @@ void ds3_set_feedback(int cstate){
     // Lampeggiamento led
     unsigned char Toff = 0x00;
     if(blink_leds && cstate != 3) Toff = 0x40;
-    ds3_control_packet[15] = Toff;
-    ds3_control_packet[20] = Toff;
-    ds3_control_packet[25] = Toff;
-    ds3_control_packet[30] = Toff;
+    ds3_control_packet[13] = Toff;
+    ds3_control_packet[18] = Toff;
+    ds3_control_packet[23] = Toff;
+    ds3_control_packet[28] = Toff;
     
     // Invio dati
     int ur = usb_control_msg(handle, USB_ENDPOINT_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE, 0x09, 0x0201, 0, ds3_control_packet, 48, 100);
