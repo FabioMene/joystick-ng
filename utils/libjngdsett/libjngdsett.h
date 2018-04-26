@@ -43,7 +43,7 @@
 //   #     double  valore in virgola mobile (punto come separatore decimale)
 //   #     string  stringa di caratteri
 //   # Il valore predefinito indica il valore da usare in mancanza di settings/nome_opzione
-//   # Nota: i valori stringa non possono essere circondati da whitespace, ne contenere '|'
+//   # Nota: i valori stringa non possono contenere '|'. Gli spazi prima e dopo la stringa vengono rimossi
 //   #       gli altri campi possono avere spazi intorno, ma non il carattere |
 //   # I campi nome, tipo e valore predefinito hanno un limite di 256 caratteri, la descrizione di 512
 //   # La lunghezza massima della riga è dunque 1284 caratteri (compreso newline)

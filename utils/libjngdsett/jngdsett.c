@@ -35,7 +35,43 @@ static int             optnum  = 0;
 static char            last_drv_name[1024] = "";
 
 #define rsscanf(n, line, fmt...) do{if(sscanf((char*)line, fmt) != n){return 1;}}while(0)
+
+static void _strip_whitespace(char* ptr){
+    int i;
     
+    int len = strlen(ptr);
+    
+    int start = -1;
+    int end   = -1;
+    
+    for(i = 0;i < len;i++){
+        if(ptr[i] != ' '){
+            start = i;
+            break;
+        }
+    }
+    
+    for(i = len - 1;i >= start;i--){
+        if(ptr[i] != ' '){
+            end = i + 1;
+            break;
+        }
+    }
+    
+    if(start == -1 || end == -1){
+        // Stringa vuota
+        ptr[0] = 0;
+    }
+    
+    if(start == 0){
+        ptr[end] = 0;
+        return;
+    }
+    
+    memmove(ptr, ptr + start, end - start);
+    ptr[end - start] = 0;
+}
+
 static int _analyze_def_line(unsigned char* line){
     if(strlen((char*)line) == 0 || line[0] == '#') return 0;
     
@@ -57,6 +93,8 @@ static int _analyze_def_line(unsigned char* line){
         else return 1;
         
         rsscanf(2, line, "%*255[^ =]%*[ =]%*255[^ |]%*[ ]|%[^|]%*[ |]%511[^|]", opt.value, opt.description);
+        
+        _strip_whitespace(opt.value);
     }
     
     // Cerca duplicati
@@ -114,7 +152,8 @@ static int _analyze_setting_line(unsigned char* line){
             break;
     }
     
-    memcpy(optdata[i].value, value, 256); 
+    memcpy(optdata[i].value, value, 256);
+    _strip_whitespace(optdata[i].value);
     
     return 0;
 }
