@@ -214,11 +214,11 @@ int main(int argc, char* argv[]){
     
     // Caricamento configurazione
     int res;
-    char strres[256];
     jngdsett_read("set_master_mac", &res);
     
     if(res){
         int mac[6], set_mac = 0;
+        char strres[256];
         switch(res){
             case 2: // Prendi da hcitool dev
             case 3: {// Prova hcitool e fallback sulle impostazioni
