@@ -1,6 +1,7 @@
 [Unit]
 Description=ds3bt start helper
-After=bluetooth.service joystick-ng.service
+Before=bluetooth.service
+After=joystick-ng.service
 
 [Service]
 Type=oneshot
