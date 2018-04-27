@@ -41,9 +41,11 @@
 #include <bluetooth/sdp_lib.h>
 #include <bluetooth/hci_lib.h>
 #include <bluetooth/l2cap.h>
+
 #include "../../include/joystick-ng.h"
 #include "../../utils/libjngdsett/libjngdsett.h"
 
+#include "../ds3/ds3-packets.h"
 
 #define printd(fmt...) syslog(LOG_DEBUG,   fmt);
 #define printi(fmt...) syslog(LOG_INFO,    fmt);
@@ -74,40 +76,6 @@ jng_info_t jng_info = {
     .flags     = JNG_FLAG_KEY_PRESSURE,
     .keyp      = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_DIRECTIONAL
 };
-
-typedef struct {
-    unsigned char      type;
-    unsigned char      res1;
-    unsigned short int keys;
-    unsigned char      ps;
-    unsigned char      res2;
-    unsigned char      LX;
-    unsigned char      LY;
-    unsigned char      RX;
-    unsigned char      RY;
-    unsigned char      res3[4];
-    unsigned char      Up;
-    unsigned char      Right;
-    unsigned char      Down;
-    unsigned char      Left;
-    unsigned char      L2;
-    unsigned char      R2;
-    unsigned char      L1;
-    unsigned char      R1;
-    unsigned char      Y;
-    unsigned char      B;
-    unsigned char      A;
-    unsigned char      X;
-    unsigned char      res4[3];
-    unsigned char      cstate; // 2: in carica, 3: non in carica (?)
-    unsigned char      blevel; // 238: in carica (livello non disponibile), 0 -> 5: 0 -> 100% // TODO: Fare chiarezza sul livello di carica 
-    unsigned char      conn; // 0x16: bluetooth, 0x12: usb (?)
-    unsigned char      res5[9];
-    unsigned short int accelX;
-    unsigned short int accelY;
-    unsigned short int accelZ;
-    unsigned short int gyroX;
-} ds3_report_t;
 
 typedef struct {
     int jngfd;
@@ -266,25 +234,6 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
-char ds3_control_packet_template[50]={
-    0x52, 0X01, // SET_REPORT, Output
-    0x00,
-    0xff, 0x00, // Small Act (Timeout, activation)
-    0xff, 0x00, // Big Act (Timeout, force)
-    0x00, 0x00, 0x00, 0x00,
-    0x00, // Led Mask (0x02 = Led1, 4=L2, 8=L3, 0x10=L4)
-    // Led blink data
-    // 0xff, sync/delay?, sync/delay?, Toff, Ton
-    // Charging period: 0x40
-    // Low battery period: 0x10 
-    0xFF, 0x27, 0x10, 0x00, 0x40, // Led 4 (offset +15, +16)
-    0xFF, 0x27, 0x10, 0x00, 0x40, // 3 (+20, +21)
-    0xFF, 0x27, 0x10, 0x00, 0x40, // 2 (+25, +26)
-    0xFF, 0x27, 0x10, 0x00, 0x40, // 1 (+30, +31)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00
-};
 
 short get_threshold(char val){
     val -= 128;
@@ -468,7 +417,7 @@ int client_loop(int ctrl, int intr){
             }
             
             // Controllo stato connessione
-            if(report.conn != 0x16){
+            if((report.conn & 0x04) == 0){ // Il joystick segnala che è connesso tramite USB
                 should_close = 1;
                 close_cause  = "Il joystick sta passando in modalità USB";
             }
@@ -501,8 +450,12 @@ int client_loop(int ctrl, int intr){
 }
 
 void* sender_thread_loop(void* varg){
-    unsigned char ds3_control_packet[50];
-    memcpy(ds3_control_packet, ds3_control_packet_template, 50);
+    unsigned char ds3_control_packet[50] = {
+        0x52, 0X01 // SET_REPORT, Output
+    };
+    
+    // Aggiunge l'effettivo pacchetto
+    memcpy(ds3_control_packet + 2, ds3_output_report_pkt, sizeof(ds3_output_report_pkt));
     
     unsigned char dummy_buffer[50];
     
@@ -592,7 +545,7 @@ void* sender_thread_loop(void* varg){
             if(arg->blevel == 238){ // In carica
                 Ton  = 0x40;
                 Toff = 0x40;
-            } else if(arg->blevel <= 2){ // Scarico
+            } else if(arg->blevel <= 3){ // Scarico
                 Ton  = 0x10;
                 Toff = 0x10;
             }

@@ -31,8 +31,11 @@
 #include <fcntl.h>
 #include <usb.h>
 #include <syslog.h>
+
 #include "../../include/joystick-ng.h"
 #include "../../utils/libjngdsett/libjngdsett.h"
+
+#include "ds3-packets.h"
 
 #define printd(fmt...) syslog(LOG_DEBUG,   fmt);
 #define printi(fmt...) syslog(LOG_INFO,    fmt);
@@ -61,61 +64,9 @@ int interface;
 
 int jngfd;
 
-typedef struct {
-    unsigned char      type;
-    unsigned char      res1;
-    unsigned short int keys;
-    unsigned char      ps;
-    unsigned char      res2;
-    unsigned char      LX;
-    unsigned char      LY;
-    unsigned char      RX;
-    unsigned char      RY;
-    unsigned char      res3[4];
-    unsigned char      Up;
-    unsigned char      Right;
-    unsigned char      Down;
-    unsigned char      Left;
-    unsigned char      L2;
-    unsigned char      R2;
-    unsigned char      L1;
-    unsigned char      R1;
-    unsigned char      Y;
-    unsigned char      B;
-    unsigned char      A;
-    unsigned char      X;
-    unsigned char      res4[3];
-    unsigned char      cstate; // 2: in carica, 3: non in carica
-    unsigned char      blevel; // 238: in carica (livello non disponibile), 0 -> 5: 0 -> 100%
-    unsigned char      conn; // usb/bluetooth?
-    unsigned char      res5[9];
-    unsigned short int accelX;
-    unsigned short int accelY;
-    unsigned short int accelZ;
-    unsigned short int gyroX;
-} ds3_report_t;
-
 ds3_report_t report;
 
-// boh
-char ds3_control_packet[48]={
-    0x00,
-    0xff, 0x00, // Small Act (Timeout, activation)
-    0xff, 0x00, // Big Act (Timeout, force)
-    0x00, 0x00, 0x00, 0x00,
-    0x1e, // Led Mask (0x02 = Led1, 4=L2, 8=L3, 0x10=L4)
-    // Led blink data
-    // 0xff, sync/delay?, sync/delay?, Toff, Ton
-    // Charging period: 0x40
-    // Low battery period: 0x10 
-    0xFF, 0x27, 0x10, 0x00, 0x40, // Led 4
-    0xFF, 0x27, 0x10, 0x00, 0x40, // 3
-    0xFF, 0x27, 0x10, 0x00, 0x40, // 2
-    0xFF, 0x27, 0x10, 0x00, 0x40, // 1
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00
-};
+unsigned char ds3_control_packet[48];
 
 int blink_leds = 0;
 
@@ -140,7 +91,7 @@ void ds3_set_feedback(int cstate){
     ds3_control_packet[28] = Toff;
     
     // Invio dati
-    int ur = usb_control_msg(handle, USB_ENDPOINT_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE, 0x09, 0x0201, 0, ds3_control_packet, 48, 100);
+    int ur = usb_control_msg(handle, USB_ENDPOINT_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE, 0x09, 0x0201, 0, (char*)ds3_control_packet, 48, 100);
     if(ur < 0){
         printw("invio dati usb: %d\n", ur);
     }
@@ -207,6 +158,8 @@ int main(int argc, char* argv[]){
     // Finalmente abbiamo il device, togliamolo dalle fredde mani del kernel
     usb_detach_kernel_driver_np(handle, interface);
     if(usb_claim_interface(handle, interface) < 0) die("impossibile bloccare l'interfaccia\n");
+    
+    memcpy(ds3_control_packet, ds3_output_report_pkt, sizeof(ds3_output_report_pkt));
     
     int usb_ret;
     
