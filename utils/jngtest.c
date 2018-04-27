@@ -132,7 +132,7 @@ void usage(char* fmt, ...){
            "    -a          legge lo stato degli assi (AXIS)\n"
            "    -s          legge lo stato dei sensori (SENSOR)\n"
            "    -c          legge lo stato del joystick (CTRL)\n"
-           "    -A          leggi tutto l'input disponibile. Equivale a -kamc\n"
+           "    -A          leggi tutto l'input disponibile. Equivale a -kasc\n"
            "    -M m=<f>    imposta il valore del motore m a f\n"
            "                m è big, small, extra1 o extra2\n"
            "    -L l=<val>  imposta lo stato del led l. <val> può essere un numero puro o\n"
@@ -271,7 +271,7 @@ int main(int argc, char* argv[]){
         }
         printf("\nFlags\n");
         if(info.flags & JNG_FLAG_KEY_PRESSURE){
-            printf("  KEY_PRESSURE: il joystick supporta la lettura della pressione sui tasti\n    ");
+            printf("  KEY_PRESSURE: il joystick supporta la lettura della pressione su questi tasti\n    ");
             for(i = 1;i <= JNG_KEY_MAX;i <<= 1){
                 if(info.keyp & i) printf("%s ", table_lookup_name(key_table, i));
             }
