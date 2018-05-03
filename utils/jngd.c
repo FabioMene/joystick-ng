@@ -30,8 +30,6 @@
 // La comunicazione tra jngctl e jngd avviene tramite socket unix
 // Il socket è /var/run/jngdriverd.socket
 
-// Il primo byte del pacchetto indica l'azione, da cui dipende la struttura del resto del pacchetto
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

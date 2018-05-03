@@ -1,5 +1,5 @@
 /*
- * jngd.h
+ * test.c
  * 
  * Copyright 2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
@@ -20,12 +20,17 @@
  * 
  * 
  */
- 
-// Questo file contiene definizioni in comune a jngd e jngctl
-
-#ifndef JNGD_H
-#define JNGD_H 1
 
 
+#include <stdio.h>
+#include "libjngd.h"
 
-#endif
+int main(){
+    char* argv[] = {"ge", "su", "cane", NULL};
+    
+    
+    jngd_driver_launch("diocan", argv);
+    
+    return 0;
+}
+
