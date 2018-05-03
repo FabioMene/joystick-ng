@@ -4,3 +4,4 @@
 Module.symvers
 *.mod.c
 modules.order
+.cache.mk

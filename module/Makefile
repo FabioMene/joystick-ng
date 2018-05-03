@@ -1,4 +1,6 @@
-KDIR = /lib/modules/$(shell uname -r)/build
+KVER = $(shell uname -r)
+
+KDIR = /lib/modules/$(KVER)/build
 
 TARGET = joystick_ng
 
