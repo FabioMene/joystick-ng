@@ -1,5 +1,5 @@
 /*
- * libjngd.c
+ * libjngd-client.c
  * 
  * Copyright 2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
@@ -23,6 +23,9 @@
 
 
 /// Include
+
+// sscanf
+#include <stdio.h>
 
 // Robe
 #include <stdlib.h>
@@ -137,7 +140,7 @@ int jngd_driver_launch(const char* driver, const char* argv[]){
     if(ret < 0)  return -EIO;
     if(ret == 1) return -EPROTO;
     
-    return buffer[0];
+    return -buffer[0];
 }
 
 
@@ -224,16 +227,171 @@ int jngd_drvoption_update(){
     
     int ret = _jngd_recv(buffer, 1);
     if(ret < 0) return -EIO;
-    if(ret != 1) return -EPROTO;
+    if(ret < 1) return -EPROTO;
     
     return -buffer[0];
 }
 
 
 // Lista opzioni
-int jngd_drvoption_list(jngd_option_t** list){
+int jngd_drvoption_list(const char* driver, jngd_option_t** list){
     unsigned char buffer[65536];
     int i, n;
-    
+
+    // Invia richiesta
     buffer[0] = JNGD_ACTION_DRVOPT_LIST;
+    buffer[1] = 0;
+    
+    if(driver != NULL){
+        buffer[1] = (strlen(driver) + 1) & 0xff;
+        memcpy((char*)buffer + 2, driver, buffer[1]);
+    }
+    
+    if(_jngd_send(buffer, 2 + buffer[1]) < 0) return -EIO;
+    
+    // Riceve la risposta
+    int ret = _jngd_recv(buffer, 65536);
+    if(ret < 0) return -EIO;
+    if(ret < 1) return -EPROTO;
+    
+    if(buffer[0] != 0) return -buffer[0];
+    
+    unsigned short num = *(unsigned short*)(buffer + 1);
+    
+    // Alloca l'array delle opzioni
+    size_t options_len = sizeof(jngd_option_t) * (num + 1);
+    
+    jngd_option_t* options = malloc(options_len);
+    if(options == NULL) return -ENOMEM;
+    
+    // Parsing risposta. Come per jngd_driver_list le stringhe vengono messe alla fine di questo array
+    // e di conseguenza realloc() può interferire con questi puntatori, che per ora vengono riempiti con offset
+    for(i = 0, n = 3;i < num && n < ret;n++){
+        // Almeno lungo quanto l'header
+        if(ret < n + 5) break;
+        
+        unsigned char      nlen = buffer[n + 0];
+        unsigned char      vlen = buffer[n + 2];
+        unsigned short     dlen = *(unsigned short*)(buffer + n + 3);
+        
+        // Almeno lungo tutta l'opzione
+        if(ret < n + 5 + nlen + vlen + dlen) break;
+        
+        // Fai spazio per le stringhe
+        options = realloc(options, options_len + nlen + vlen + dlen);
+        if(options == NULL) return -ENOMEM;
+        
+        // Copia le stringhe
+        memcpy((char*)options + options_len,               buffer + n + 5,               nlen);
+        memcpy((char*)options + options_len + nlen,        buffer + n + 5 + nlen,        vlen);
+        memcpy((char*)options + options_len + nlen + vlen, buffer + n + 5 + nlen + vlen, dlen);
+        
+        // Aggiorna gli offset (e il tipo dell'opzione)
+        options[i].name        = (char*)options_len;
+        options[i].type        = buffer[n + 1];
+        options[i].def         = (char*)(options_len + nlen);
+        options[i].description = (char*)(options_len + nlen + vlen);
+        
+        // Aggiorna la lunghezza di options
+        options_len += nlen + vlen + dlen;
+        
+        // Aggiorna gli indici
+        n += 5 + nlen + vlen + dlen;
+        i += 1;
+    }
+    
+    num = i + 1;
+    options[i].type = JNGD_DRVOPT_TYPE_END;
+    
+    for(i = 0;i < num;i ++){
+        options[i].name        = (char*)options + (size_t)options[i].name;
+        options[i].def         = (char*)options + (size_t)options[i].def;
+        options[i].description = (char*)options + (size_t)options[i].description;
+    }
+    
+    *list = options;
+    
+    return 0;
+}
+
+
+// Ottieni un opzione
+int jngd_drvoption_get(const char* option, jngd_option_type_e type, void* dst){
+    unsigned char buffer[258];
+    
+    // Invia richiesta
+    buffer[0] = JNGD_ACTION_DRVOPT_GET;
+    buffer[1] = (strlen(option) + 1) & 0xff;
+    memcpy(buffer + 2, option, buffer[1]);
+    
+    if(_jngd_send(buffer, 2 + buffer[1]) < 0) return -EIO;
+    
+    // Ottieni la risposta + controlli
+    int ret = _jngd_recv(buffer, 258);
+    if(ret < 0) return -EIO;
+    if(ret < 1) return -EPROTO;
+    
+    if(buffer[0] != 0) return -buffer[0];
+    
+    if(buffer[1] < ret - 2) return -EPROTO;
+    
+    // Copia la risposta su dst, con le opportune conversioni
+    switch(type){
+        case JNGD_DRVOPT_TYPE_INT:
+            if(sscanf((char*)buffer + 2, "%d", (int*)dst) != 1) return -EINVAL;
+            return 0;
+        
+        case JNGD_DRVOPT_TYPE_DOUBLE:
+            if(sscanf((char*)buffer + 2, "%lf", (double*)dst) != 1) return -EINVAL;
+            return 0;
+        
+        default:
+            // Se il tipo è stringa o exec copia soltanto
+            break;
+    }
+    
+    memcpy(dst, buffer + 2, buffer[1]);
+    
+    return 0;
+}
+
+
+// Imposta un opzione
+int jngd_drvoption_set(const char* option, jngd_option_type_e type, const void* src){
+    unsigned char buffer[515];
+    
+    // Crea la richiesta
+    buffer[0] = JNGD_ACTION_DRVOPT_SET;
+    buffer[1] = (strlen(option) + 1) & 0xff;
+    memcpy(buffer + 3, option, buffer[1]);
+    
+    switch(type){
+        case JNGD_DRVOPT_TYPE_INT:
+            buffer[2] = snprintf((char*)buffer + 3 + buffer[1], 256, "%d", *(int*)src);
+            break;
+        
+        case JNGD_DRVOPT_TYPE_DOUBLE:
+            buffer[2] = snprintf((char*)buffer + 3 + buffer[1], 256, "%lf", *(double*)src);
+            break;
+        
+        default:
+            // Tratta src come stringa 0-terminata
+            buffer[2] = strlen((char*)src);
+            strcpy((char*)buffer + 3 + buffer[1], (char*)src);
+            break;
+    }
+    
+    // Aggiungi il terminatore
+    buffer[3 + buffer[1] + buffer[2]] = 0;
+    buffer[2]++;
+    
+    // Invia richiesta
+    if(_jngd_send(buffer, 3 + buffer[1] + buffer[2]) < 0) return -EIO;
+    
+    // Ottieni la risposta
+    int ret = _jngd_recv(buffer, 1);
+    if(ret < 0) return -EIO;
+    if(ret < 1) return -EPROTO;
+    
+    return -buffer[0];
 }

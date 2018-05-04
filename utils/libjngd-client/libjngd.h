@@ -26,8 +26,8 @@
 
 // Parametri di jngd
 // Di default il socket è leggibile e scrivibile solo per root e il gruppo input
-#define SOCKET_FILE  "test.sock" /*"/var/run/jngd.socket"*/
-#define SOCKET_GROUP "input"
+#define SOCKET_FILE    "test.sock" /*"/var/run/jngd.socket"*/
+#define ELEVATED_GROUP "input"
 
 // Le funzioni ritornano le costanti E* da errno.h
 
@@ -48,8 +48,8 @@
 // Il pacchetto di richiesta è indicato con [req], quello di risposta con [resp],
 // se una o entrambe vengono omesse significa che il payload è vuoto
 
-// Le azioni (o sotto-azioni) che richiedono l'appartenza al gruppo SOCKET_GROUP sono indicate
-// con [sg] dopo il nome della costante
+// Le azioni (o sotto-azioni) che richiedono l'appartenza al gruppo ELEVATED_GROUP sono indicate
+// con [eg] dopo il nome della costante
 
 typedef enum {
     // Avvia un driver, eseguendo il file specificato con 'exec=' nella definizione del driver
@@ -59,7 +59,7 @@ typedef enum {
     //     1    len argomenti
     //     len  driver
     //     len  argomenti (stringa concatenata di tutti gli argomenti terminati da 0)
-    JNGD_ACTION_DRV_LAUNCH = 0x00, // [sg]
+    JNGD_ACTION_DRV_LAUNCH = 0x00, // [eg]
 
 
     // Ottiene i driver installati
@@ -76,7 +76,7 @@ typedef enum {
     ///                           Nota: non tutte le opzioni globali sono utili ai driver 
     
     // Aggiorna le definizioni di un driver (es. dopo l'installazione di un driver)
-    JNGD_ACTION_DRVOPT_UPDATE, // [sg]
+    JNGD_ACTION_DRVOPT_UPDATE, // [eg]
 
 
     // Ottieni la lista di impostazioni globali o di un driver
@@ -115,7 +115,7 @@ typedef enum {
     //     1    len valore
     //     len  opzione
     //     len  valore (come stringa terminata)
-    JNGD_ACTION_DRVOPT_SET // [sg]
+    JNGD_ACTION_DRVOPT_SET // [eg]
 } jngd_action_e;
 
 
@@ -124,10 +124,11 @@ typedef enum {
 
 // Tipi opzione
 typedef enum {
-    JNGD_DRVOPT_TYPE_INT = 0
-    JNGD_DRVOPT_TYPE_DOUBLE
-    JNGD_DRVOPT_TYPE_STRING
-    JNGD_DRVOPT_TYPE_EXEC
+    JNGD_DRVOPT_TYPE_END = -1, // Non è un vero tipo, indica la fine della lista
+    JNGD_DRVOPT_TYPE_INT = 0,  // int
+    JNGD_DRVOPT_TYPE_DOUBLE,   // double
+    JNGD_DRVOPT_TYPE_STRING,   // char* 0-terminato
+    JNGD_DRVOPT_TYPE_EXEC      // char* 0-terminato
 } jngd_option_type_e;
 
 // Opzioni
@@ -141,11 +142,9 @@ typedef struct {
 //
 
 
-#ifdef JNGD_SERVER
-    // Libreria server (statica)
-    #define EXTERN_DECL 
-#else
-    // Libreria client (dinamica)
+// Questo file è usato anche da jngd.c
+#if !defined(JNGD_SERVER)
+    // Prototipi delle funzioni non usate in jngd.c
     
     // Avvia un driver. La lista di argomenti è terminata con NULL
     extern int jngd_driver_launch(const char* driver, const char* argv[]);
@@ -154,9 +153,19 @@ typedef struct {
     // La lista viene allocata dinamicamente e deve essere rilasciata con free()
     extern int jngd_driver_list(char*** list);
     
+    // Aggiorna le definizioni dei driver (lato server)
     extern int jngd_drvoption_update();
     
+    // Lista le opzioni di un driver. Se driver è NULL (o stringa vuota) ritorna le opzioni globali
+    extern int jngd_drvoption_list(const char* driver, jngd_option_t** list);
     
+    // Ottieni il valore di un'opzione. Il tipo si deve sapere in anticipo
+    // La conversione avviene solo per TYPE_INT e TYPE_DOUBLE, gli altri tipi
+    // ritornano i dati ricevuti da jngd
+    extern int jngd_drvoption_get(const char* option, jngd_option_type_e type, void* dst);
+    
+    // Imposta il valore di un opzione, i parametri sono molto simili a jngd_drvoption_get
+    extern int jngd_drvoption_set(const char* option, jngd_option_type_e type, const void* src);
 #endif
 
 // LIBJNGD_H
