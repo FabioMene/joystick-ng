@@ -42,12 +42,14 @@
 void usage(char* fmt, ...){
     printf("jngctl, interfaccia di controllo per jngd\n"
            "Comandi disponibili:\n"
-           "  jngctl dlist\n"
+           "  jngctl drv list\n"
            "    Stampa una lista dei driver installati\n"
            "\n"
-           "  jngctl dlaunch <driver> [argomenti...]\n"
+           "  jngctl drv launch <driver> [argomenti...]\n"
            "    Avvia un driver (In genere usato con udev)\n"
            "\n"
+           "  jngctl drv reload\n"
+           "    Ricarica le definizioni dei driver dal disco\n"
            "\n"
            "formato opzioni\n"
            "  opzione         Opzione globale\n"
@@ -57,9 +59,10 @@ void usage(char* fmt, ...){
            "    Stampa le opzioni del driver e la loro descrizione\n"
            "    Se driver non è specificato stampa le opzioni globali\n"
            "\n"
-           "  jngctl opt get <opzione|driver.|driver.opzione>\n"
+           "  jngctl opt get <opzione|.|driver.|driver.opzione>\n"
            "    Stampa il valore dell'opzione. Se si specifica solo driver. (punto letterale)\n"
-           "    stampa i valori di tutte le opzioni del driver\n"
+           "    stampa i valori di tutte le opzioni del driver, se si specifica solo .\n"
+           "    stampa tutte le opzioni globali\n"
            "\n"
            "  jngctl opt set <opzione|driver.opzione> <val>\n"
            "    Imposta l'opzione\n"
@@ -83,40 +86,55 @@ void usage(char* fmt, ...){
 int main(int argc, char* argv[]){
     if(argc < 2) usage(NULL);
     
-    int i, ret;
+    int ret;
     
-    if(strcmp(argv[1], "dlist") == 0){
-        char** list;
+    if(strcmp(argv[1], "drv") == 0){
+        if(argc < 3) usage("Il comando drv richiede almeno un argomento");
         
-        ret = jngd_driver_list(&list);
-        CHECK_RET(ret);
-        
-        char** cursor;
-        ret = 0;
-        
-        for(cursor = list;*cursor;cursor++, ret++){
-            printf("%s\n", *cursor);
+        if(strcmp(argv[2], "list") == 0){
+            char** list;
+            
+            ret = jngd_driver_list(&list);
+            CHECK_RET(ret);
+            
+            char** cursor;
+            ret = 0;
+            
+            for(cursor = list;*cursor;cursor++, ret++){
+                printf("%s\n", *cursor);
+            }
+            
+            if(!ret) printf("Nessun driver installato\n");
+            
+            free(list);
+            
+            return 0;
         }
         
-        if(!ret) printf("Nessun driver installato\n");
+        if(strcmp(argv[2], "launch") == 0){
+            if(argc < 4) usage("Il comando drv:launch richiede almeno un argomento");
+            
+            ret = jngd_driver_launch(argv[3], (const char**)argv + 4);
+            
+            CHECK_RET(ret);
+            
+            return 0;
+        }
         
-        free(list);
+        if(strcmp(argv[2], "reload") == 0){
+            ret = jngd_drvoption_update();
+            
+            CHECK_RET(ret);
+            
+            return 0;
+        }
         
-        return 0;
-    }
-    
-    if(strcmp(argv[1], "dlaunch") == 0){
-        if(argc < 3) usage("Il comando dlaunch richiede almeno un argomento");
-        
-        ret = jngd_driver_launch(argv[2], argv + 3);
-        
-        CHECK_RET(ret);
-        
-        return 0;
+        usage("Comando drv:%s non riconosciuto\n");
+        return 1;
     }
     
     if(strcmp(argv[1], "opt") == 0){
-        if(argc < 3) usage("Il comando opt richiede almeno un argomenti");
+        if(argc < 3) usage("Il comando opt richiede almeno un argomento");
         
         if(strcmp(argv[2], "list") == 0){
             jngd_option_t* opts;
@@ -126,112 +144,135 @@ int main(int argc, char* argv[]){
             
             CHECK_RET(ret);
             
+            if(argv[3] == NULL){
+                printf("Opzioni globali:\n");
+            } else {
+                printf("Opzioni per %s:\n", argv[3]);
+            }
+            
+            jngd_option_t* opt;
+            
+            for(opt = opts;opt->type != JNGD_DRVOPT_TYPE_END;opt++){
+                char* type_string;
+                
+                switch(opt->type){
+                    case JNGD_DRVOPT_TYPE_INT:
+                        type_string = "intero";
+                        break;
+                    
+                    case JNGD_DRVOPT_TYPE_DOUBLE:
+                        type_string = "decimale";
+                        break;
+                    
+                    case JNGD_DRVOPT_TYPE_STRING:
+                        type_string = "stringa";
+                        break;
+                    
+                    default:
+                        type_string = "??";
+                        break;
+                }
+                
+                printf("%s (%s)\n    %s\n    [%s]\n\n", opt->name, type_string, opt->description, opt->def);
+            }
+            
+            free(opts);
+            
             return 0;
         }
+        
+        if(strcmp(argv[2], "get") == 0){
+            if(argc < 4) usage("Il comando opt:get richiede almeno un argomento");
+            
+            char name[256];
+            char buffer[256];
+            
+            char* option = argv[3];
+            
+            // Tutte le opzioni di questo driver
+            if(option[strlen(option) - 1] == '.'){
+                option[strlen(option) - 1] = 0;
+                
+                jngd_option_t* opts;
+                jngd_option_t* opt;
+                
+                if(option[0] != 0){ // Se stiamo elencando driver + globali
+                    printf("Opzioni del driver:\n");
+                    
+                    ret = jngd_drvoption_list(option, &opts);
+                
+                    CHECK_RET(ret);
+                
+                    for(opt = opts;opt->type != JNGD_DRVOPT_TYPE_END;opt++){
+                        strcpy(name, option); // driver
+                        strcat(name, ".");
+                        strcat(name, opt->name);
+                        
+                        ret = jngd_drvoption_get(name, JNGD_DRVOPT_TYPE_STRING, buffer);
+                        
+                        CHECK_RET(ret);
+                        
+                        printf("    %s: %s\n", opt->name, buffer);
+                    }
+                
+                    free(opts);
+                    
+                    printf("Globali per questo driver:\n");
+                }
+                
+                // Elenca le globali con gli override del driver
+                ret = jngd_drvoption_list(NULL, &opts);
+            
+                CHECK_RET(ret);
+            
+                for(opt = opts;opt->type != JNGD_DRVOPT_TYPE_END;opt++){
+                    if(option[0] != 0){
+                        strcpy(name, option); // driver
+                        strcat(name, ".");
+                        strcat(name, opt->name);
+                    } else {
+                        strcpy(name, opt->name);
+                    }
+                    
+                    ret = jngd_drvoption_get(name, JNGD_DRVOPT_TYPE_STRING, buffer);
+                    
+                    CHECK_RET(ret);
+                    
+                    printf("    %s: %s\n", opt->name, buffer);
+                }
+            
+                free(opts);
+                
+                return 0;
+            }
+            
+            // Solo l'opzione indicata
+            ret = jngd_drvoption_get(option, JNGD_DRVOPT_TYPE_STRING, buffer);
+            
+            CHECK_RET(ret);
+            
+            printf("%s\n", buffer);
+            
+            return 0;
+        }
+        
+        if(strcmp(argv[2], "set") == 0){
+            if(argc < 5) usage("Il comando opt:set richiede almeno un argomento");
+            
+            ret = jngd_drvoption_set(argv[3], JNGD_DRVOPT_TYPE_STRING, argv[4]);
+            
+            CHECK_RET(ret);
+            
+            return 0;
+        }
+        
+        usage("Comando opt:%s non riconosciuto", argv[2]);
+        return 1;
     }
+    
+    if(strcmp(argv[1], "help") == 0) usage(NULL);
     
     usage("Comando %s non riconosciuto", argv[1]);
     return 1;
-    /*
-    
-        
-        if(strcmp(argv[3], "opt") == 0){
-            if(argc < 5) usage("Il comando drv:opt richiede almeno un argomento");
-            
-            if(jngdsett_load_onlydef(driver)){
-                printf("Impossibile caricare la definizione del driver\n"
-                       "Il driver potrebbe non essere installato\n");
-                return 1;
-            }
-            
-            if(strcmp(argv[4], "list") == 0){
-                int num;
-                jngdsett_opt_t* options = jngdsett_optdata(&num);
-                
-                char* types[] = {
-                    "int",
-                    "double",
-                    "string"
-                };
-                
-                for(i = 0;i < num;i++){
-                    if(options[i].type == JNGDSETT_TYPE_EXEC){
-                        printf("Percorso eseguibile\n    %s\n\n", options[i].value);
-                    } else {
-                        printf("%s (%s)\n    %s\n    [%s]\n\n", options[i].name, types[options[i].type], options[i].description, options[i].value);
-                    }
-                }
-                return 0;
-            }
-            
-            if(strcmp(argv[4], "get") == 0){
-                jngdsett_load(driver);
-                
-                int num;
-                jngdsett_opt_t* options = jngdsett_optdata(&num);
-                
-                char* match = NULL;
-                
-                if(argc >= 6){
-                    match = argv[5];
-                }
-                
-                for(i = 0;i < num;i++){
-                    if(!match || strcmp(options[i].name, match) == 0){
-                        if(!match) printf("%s: ", options[i].name);
-                        
-                        switch(options[i].type){
-                            case JNGDSETT_TYPE_INT: {
-                                int val;
-                                sscanf(options[i].value, "%i", &val);
-                                printf("%d\n", val);
-                                } break;
-                            
-                            case JNGDSETT_TYPE_DOUBLE: {
-                                double val;
-                                sscanf(options[i].value, "%lf", &val);
-                                printf("%lf\n", val);
-                                } break;
-                            
-                            case JNGDSETT_TYPE_STRING:
-                            case JNGDSETT_TYPE_EXEC:
-                                printf("%s\n", options[i].value);
-                                break;
-                        }
-                    }
-                }
-                return 0;
-            }
-            
-            if(strcmp(argv[4], "set") == 0){
-                if(argc < 7) usage("drv:opt:set richiede due argomenti");
-                
-                unsigned char buffer[32768];
-                char* packet = (char*)buffer + 1;
-                
-                buffer[0] = ACTION_DRV_MODSETT;
-                
-                packet[0] = (unsigned char)strlen(driver) + 1;
-                strcpy(packet + 3, driver);
-                
-                packet[1] = (unsigned char)strlen(argv[5]) + 1;
-                strcpy(packet + 3 + packet[0], argv[5]);
-                
-                packet[2] = (unsigned char)strlen(argv[6]) + 1;
-                strcpy(packet + 3 + packet[0] + packet[1], argv[6]);
-                
-                jngd_connect();
-                jngd_send(buffer, 1+ 3 + packet[0] + packet[1] + packet[2]);
-                return 0;
-            }
-            
-            usage("Comando drv:opt:%s non riconosciuto", argv[4]);
-        }
-        
-        usage("Comando drv:%s non riconosciuto", argv[3]);
-    }
-    
-    usage("Comando %s non riconosciuto", argv[1]);
-    return 0;*/
 }
 

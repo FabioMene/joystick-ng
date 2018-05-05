@@ -1,7 +1,7 @@
 # Opzioni globali di joystick-ng
 
-axis_threshold = int | 2500 | Zona morta per le levette (da 0 a 32767)
+axis_deadzone = int | 2500 | Zona morta per le levette (da 0 a 32767)
 
-keyp_threshold = int | 0 | Zona morta per i pulsanti sensibili alla pressione (da 0 a 255)
+keyp_deadzone = int | 0 | Zona morta per i pulsanti sensibili alla pressione (da 0 a 255)
 
 inactivity_timeout = int | 300 | Numero di secondi di inattività prima che il joystick si spenga (es. joystick wireless)

@@ -1,4 +1,4 @@
-CFLAGS = -DDEBUG
+CFLAGS =
 
 all:
 	gcc $(CFLAGS) -Wall -Wextra -c jngd.c -o jngd.o

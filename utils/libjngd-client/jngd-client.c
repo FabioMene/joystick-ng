@@ -137,8 +137,8 @@ int jngd_driver_launch(const char* driver, const char* argv[]){
     if(ret < 0) return -EIO;
     
     ret = _jngd_recv(buffer, 1);
-    if(ret < 0)  return -EIO;
-    if(ret == 1) return -EPROTO;
+    if(ret < 0) return -EIO;
+    if(ret < 1) return -EPROTO;
     
     return -buffer[0];
 }
@@ -266,7 +266,7 @@ int jngd_drvoption_list(const char* driver, jngd_option_t** list){
     
     // Parsing risposta. Come per jngd_driver_list le stringhe vengono messe alla fine di questo array
     // e di conseguenza realloc() può interferire con questi puntatori, che per ora vengono riempiti con offset
-    for(i = 0, n = 3;i < num && n < ret;n++){
+    for(i = 0, n = 3;i < num;){
         // Almeno lungo quanto l'header
         if(ret < n + 5) break;
         
