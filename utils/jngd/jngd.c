@@ -93,6 +93,14 @@ int main(void){
     
     printi("Pronto");
     
+    // Fork in background
+    int pid = fork();
+    if(pid < 0) return 1;
+    if(pid)     return 0;
+
+    int sid = setsid();
+    if(sid < 0) return 1;
+
     memset(threads_used, 0, sizeof(threads_used));
     
     while(1){

@@ -30,7 +30,7 @@
 #include <usb.h>
 #include <syslog.h>
 #include "../../include/joystick-ng.h"
-#include "../../utils/libjngdsett/libjngdsett.h"
+#include "../../utils/libjngd-client/libjngd.h"
 
 #define printd(fmt...) syslog(LOG_DEBUG,   fmt);
 #define printi(fmt...) syslog(LOG_INFO,    fmt);
@@ -163,7 +163,7 @@ int main(int argc, char* argv[]){
     
     int usb_ret;
     
-    jngdsett_load(NULL);
+    jngd_set_drvoption_driver(NULL);
     
     // Avvio mainloop
     
@@ -175,7 +175,7 @@ int main(int argc, char* argv[]){
     ioctl(jngfd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_NORMAL);
     
     int res;
-    jngdsett_read("set_leds", &res);
+    jngd_drvoption_get("set_leds", JNGD_DRVOPT_TYPE_INT, &res);
     
     if(res){
         unsigned int slot;
@@ -187,7 +187,7 @@ int main(int argc, char* argv[]){
         char strres[256];
         
         if(res == 2){ // Led fissi
-            jngdsett_read("fixed_leds", strres);
+            jngd_drvoption_get("fixed_leds", JNGD_DRVOPT_TYPE_STRING, strres);
             
             if(strcmp(strres, "off") == 0){
                 led_status = 0;
@@ -225,7 +225,7 @@ int main(int argc, char* argv[]){
         }
     }
     
-    jngdsett_read("axis_dz", &axis_deadzone);
+    jngd_drvoption_get("axis_deadzone", JNGD_DRVOPT_TYPE_INT, &axis_deadzone); // Globali
     
     // Mainloop!
     while(1){

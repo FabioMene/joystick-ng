@@ -33,7 +33,7 @@
 #include <syslog.h>
 
 #include "../../include/joystick-ng.h"
-#include "../../utils/libjngdsett/libjngdsett.h"
+#include "../../utils/libjngd-client/libjngd.h"
 
 #include "ds3-packets.h"
 
@@ -68,6 +68,8 @@ ds3_report_t report;
 
 unsigned char ds3_control_packet[48];
 
+int axis_deadzone = 10;
+
 int blink_leds = 0;
 
 void ds3_set_feedback(int cstate){
@@ -99,7 +101,7 @@ void ds3_set_feedback(int cstate){
 
 short get_threshold(char val){
     val -= 128;
-    if(val > -10 && val < 10) val = 0;
+    if(val > -axis_deadzone && val < axis_deadzone) val = 0;
     return val << 8;
 }
 
@@ -163,11 +165,11 @@ int main(int argc, char* argv[]){
     
     int usb_ret;
     
-    jngdsett_load(NULL);
+    jngd_set_drvoption_driver(NULL);
     
     // Caricamento configurazione
     int res;
-    jngdsett_read("set_master_mac", &res);
+    jngd_drvoption_get("set_master_mac", JNGD_DRVOPT_TYPE_INT, &res);
     
     if(res){
         int mac[6], set_mac = 0;
@@ -184,7 +186,7 @@ int main(int argc, char* argv[]){
                 }
             case 1: // Prendi dalle impostazioni
             default:
-                jngdsett_read("master_mac", strres);
+                jngd_drvoption_get("master_mac", JNGD_DRVOPT_TYPE_STRING, strres);
                 if(sscanf(strres, "%x:%x:%x:%x:%x:%x", mac + 0, mac + 1, mac + 2, mac + 3, mac + 4, mac + 5) == 6){
                     set_mac = 1;
                 }
@@ -220,7 +222,7 @@ int main(int argc, char* argv[]){
     unsigned int slot;
     ioctl(jngfd, JNGIOCGETSLOT, &slot);
     
-    jngdsett_read("set_leds", &res);
+    jngd_drvoption_get("set_leds", JNGD_DRVOPT_TYPE_INT, &res);
     if(res){
         // Questo dimostra la flessibilità di joystick-ng
         unsigned int slot;
@@ -234,7 +236,7 @@ int main(int argc, char* argv[]){
         char strres[256];
         
         if(res == 2){ // Led fissi
-            jngdsett_read("fixed_leds", strres);
+            jngd_drvoption_get("fixed_leds", JNGD_DRVOPT_TYPE_STRING, strres);
             l4 = strres[0] != '0';
             l3 = strres[1] != '0';
             l2 = strres[2] != '0';
@@ -269,7 +271,10 @@ int main(int argc, char* argv[]){
         close(dfd);
     }
     
-    jngdsett_read("blink_leds", &blink_leds);
+    jngd_drvoption_get("axis_deadzone", JNGD_DRVOPT_TYPE_INT, &axis_deadzone); // Globali
+    axis_deadzone >>= 8;
+    
+    jngd_drvoption_get("blink_leds", JNGD_DRVOPT_TYPE_INT, &blink_leds);
     
     // Mainloop!
     while(1){

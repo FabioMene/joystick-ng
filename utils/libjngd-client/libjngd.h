@@ -26,7 +26,7 @@
 
 // Parametri di jngd
 // Di default il socket è leggibile e scrivibile solo per root e il gruppo input
-#define SOCKET_FILE    "/tmp/test.sock" /*"/var/run/jngd.socket"*/
+#define SOCKET_FILE    "/var/run/jngd.socket"
 #define ELEVATED_GROUP "input"
 
 // Le funzioni ritornano le costanti E* da errno.h

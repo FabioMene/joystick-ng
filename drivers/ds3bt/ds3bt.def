@@ -1,13 +1,12 @@
 # Configurazione per il driver ds3bt
-# Questa è una versione ridotta di ds3.def (dal driver ds3)
+# Alcune opzioni sono in comune con il driver ds3
 exec=/usr/local/share/jng/drivers/ds3bt
 
-autostart   = int    | 1  | Avvia automaticamente il demone quando viene collegato un joystick
+autostart   = int    | 1  | Avvia automaticamente il demone all'avvio del sistema
 
 set_leds    = int    | 1  | Se 0 non vengono impostati led dal driver (solo feedback). Se 1 i led indicano lo slot. Se 2 il driver imposta l'opzione fixed_leds
 fixed_leds  = string |0001| Questa stringa indica i led fissi, dal quarto al primo
 
 blink_leds  = int    | 1  | Se impostato a 1 fa lampeggiare i led se il controller si sta caricando o se è scarico
 
-timeout     = int    |300 | Se diverso da 0 indica i secondi di inattività prima che il joystick si spenga
 ps_shutdown = int    | 3  | Se diverso da 0 tenere premuto il tasto PS per questi secondi spegne il joystick
