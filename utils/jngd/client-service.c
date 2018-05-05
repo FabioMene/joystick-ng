@@ -21,14 +21,6 @@
  * 
  */
 
-#include <stdlib.h>
-#include <unistd.h>
-
-#include <sys/types.h>
-#include <sys/socket.h>
-
-#include <pthread.h>
-
 #include "jngd.h"
 
 void* client_service(void* arg){
@@ -40,6 +32,8 @@ void* client_service(void* arg){
     
     int is_elev = isUserElevated(sock);
     
+    printi("fd: %d | isUserElevated(): %s", sock, (is_elev < 0)?"Errore":(is_elev)?"sì":"no");
+    
     unsigned char buffer[65536];
     
     int len, ret;
@@ -47,29 +41,60 @@ void* client_service(void* arg){
     while(1){
         len = read(sock, buffer, 65535);
         
-        if(len < 0) break;
+        if(len < 0){
+            printw("fd: %d | Errore ricezione dati", sock);
+            break;
+        }
+        
+        if(len == 0) break; // Fine normale
         
         if(len < 1){
-            printw("Errore protocollo");
+            printw("fd: %d | Errore protocollo", sock);
             break;
         }
         
         len--;
-        switch(buffer[0]){
+        switch((jngd_action_e)buffer[0]){
+            #define CHECK_ELEVATION() if(is_elev != 1){printi("fd: %d | Permesso negato", sock);ret = EACCES;break;}
+            
             case JNGD_ACTION_DRV_LAUNCH:
-                if(is_elev){
-                    ret = do_drv_launch(buffer + 1, &len);
-                } else {
-                    ret = EACCESS;
-                }
+                printi("fd: %d | Nuova richiesta: [DRV_LAUNCH]", sock);
+                CHECK_ELEVATION();
+                
+                ret = do_drv_launch(buffer + 1, &len);
                 break;
             
             case JNGD_ACTION_DRV_LIST:
+                printi("fd: %d | Nuova richiesta: [DRV_LIST]", sock);
                 ret = do_drv_list(buffer + 1, &len);
                 break;
             
+            case JNGD_ACTION_DRVOPT_UPDATE:
+                printi("fd: %d | Nuova richiesta: [DRVOPT_UPDATE]", sock);
+                CHECK_ELEVATION();
+                
+                ret = do_drvopt_update(buffer + 1, &len);
+                break;
+            
+            case JNGD_ACTION_DRVOPT_LIST:
+                printi("fd: %d | Nuova richiesta: [DRVOPT_LIST]", sock);
+                ret = do_drvopt_list(buffer + 1, &len);
+                break;
+            
+            case JNGD_ACTION_DRVOPT_GET:
+                printi("fd: %d | Nuova richiesta: [DRVOPT_GET]", sock);
+                ret = do_drvopt_get(buffer + 1, &len);
+                break;
+            
+            case JNGD_ACTION_DRVOPT_SET:
+                printi("fd: %d | Nuova richiesta: [DRVOPT_SET]", sock);
+                CHECK_ELEVATION();
+                
+                ret = do_drvopt_set(buffer + 1, &len);
+                break;
+            
             default:
-                printw("Azione non valida: %02x", buffer[0]);
+                printw("fd: %d | Azione non valida: %02x", sock, buffer[0]);
                 ret = EINVAL;
                 break;
         }
@@ -83,70 +108,12 @@ void* client_service(void* arg){
             buffer[0] = 0;
         }
         
-        if(send(sock, buffer, len + 1) != len){
-            printw("Impossibile inviare la risposta al client");
+        if(write(sock, buffer, len) != len){
+            printw("fd: %d | Impossibile inviare la risposta al client", sock);
         }
     }
     
-    
-    /*
-    
-    unsigned char* packet = buffer + 1;
-    
-    // Mainloop
-    while(1){
-        int len;
-        
-      _skip_to_recv:
-        len = recvfrom(servfd, buffer, 32768, 0, NULL, NULL);
-        if(len < 0){
-            printe("Errore ricezione pacchetto (errno %d)", errno);
-            close(servfd);
-            unlink(SOCKET_FILE);
-            return 1;
-        }
-        
-        if(len < 1){
-            printw("Pacchetto senza header (ed è di un solo byte)");
-            continue;
-        }
-        
-        len--;
-        
-        #define check_size(min) {int __min = (min); if(len < __min){printw("Lunghezza pacchetto richiesta: %d, ricevuta: %d", __min, len);goto _skip_to_recv;}}
-        
-        switch(buffer[0]){
-            case ACTION_DRV_LAUNCH: {
-                
-            } break;
-            
-            case ACTION_DRV_MODSETT: {
-                // Controllo pacchetti e sanity check
-                check_size(3);
-                check_size(3 + packet[0] + packet[1] + packet[2]);
-                
-                packet[3 + packet[0] - 1] = 0;
-                packet[3 + packet[0] + packet[1] - 1] = 0;
-                packet[3 + packet[0] + packet[1] + packet[2] - 1] = 0;
-                
-                // Carica il driver
-                if(jngdsett_load((char*)packet + 3) < 0){
-                    printe("[DRV_MODSETT] Driver \"%s\" non trovato", packet + 3);
-                    goto _skip_to_recv;
-                }
-                
-                int res = jngdsett_write((char*)packet + 3 + packet[0], (char*)packet + 3 + packet[0] + packet[1]);
-                
-                jngdsett_reset();
-                
-                if(res){
-                    printe("[DRV_MODSETT] Scrittura fallita per il driver %s", packet + 3);
-                }
-            } break;
-        }
-        
-        #undef check_size
-    }*/
+    printi("fd: %d | Uscita", sock);
     
     // Fine thread
     

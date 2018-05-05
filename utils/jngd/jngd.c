@@ -31,34 +31,16 @@
 #define _GNU_SOURCE
 
 #include <stdio.h>
-#include <stdlib.h>
-
-#include <unistd.h>
-#include <string.h>
-#include <fcntl.h>
-
-#include <errno.h>
-
 #include <signal.h>
 
-// Socket UNIX
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-
-// Operazioni file
-#include <unistd.h>
-
-// Costanti E*
-#include <errno.h>
+#include <sys/stat.h>
 
 #include "jngd.h"
 
-unsigned char buffer[32768];
 
 int servfd = -1;
 
-void sigterm_handler(int unused){
+void sigterm_handler(int unused __attribute__((unused))){
     close(servfd);
     unlink(SOCKET_FILE);
     printw("Uscita causata da SIGTERM");
@@ -73,21 +55,14 @@ int main(void){
     // Inizializzazione
     chdir("/");
     
-    close(0);
-    close(1);
-    close(2);
-    
-    
     // Ignora l'handling dei processi figli (non diventeranno zombie)
     signal(SIGCHLD, SIG_IGN);
     
     // In caso jngd venga terminato (da systemd per esempio, service joystick-ng stop)
     signal(SIGTERM, sigterm_handler);
     
-    
-    openlog("jngd", LOG_CONS | LOG_PID, LOG_DAEMON);
+    printinit();
     printi("Inizializzazione");
-    
     
     // Inizializza socket server
     servfd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
@@ -109,6 +84,13 @@ int main(void){
         return 1;
     }
     
+    if(chmod(SOCKET_FILE, 0777) < 0){
+        printw("Impossibile impostare i permessi del socket");
+    }
+    
+    // Carica le definizioni driver
+    drvoption_load();
+    
     printi("Pronto");
     
     memset(threads_used, 0, sizeof(threads_used));
@@ -120,6 +102,8 @@ int main(void){
             printe("Errore accept()");
             return 1;
         }
+        
+        printi("Nuova connessione");
         
         pthread_mutex_lock(&threads_mutex);
             // Cerca uno slot libero

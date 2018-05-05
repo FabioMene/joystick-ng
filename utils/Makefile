@@ -3,7 +3,7 @@ all:
 	make -C libjngd-client
 	
 	gcc -Wall jngtest.c -o jngtest
-	gcc -Wall jngctl.c -o jngctl -Llibjngdsett -ljngdsett
+	gcc -Wall jngctl.c -o jngctl -Llibjngd-client -ljngd-client
 
 install:
 	make -C jngd install

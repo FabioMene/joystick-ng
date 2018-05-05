@@ -36,8 +36,7 @@
 #include <sys/un.h>
 #include <dirent.h>
 
-#include "jngd.h"
-#include "libjngdsett/libjngdsett.h"
+#include "libjngd-client/libjngd.h"
 
 
 void usage(char* fmt, ...){
@@ -46,16 +45,23 @@ void usage(char* fmt, ...){
            "  jngctl dlist\n"
            "    Stampa una lista dei driver installati\n"
            "\n"
-           "  jngctl drv <driver> exec [argomenti...]\n"
+           "  jngctl dlaunch <driver> [argomenti...]\n"
            "    Avvia un driver (In genere usato con udev)\n"
            "\n"
-           "  jngctl drv <driver> opt list\n"
+           "\n"
+           "formato opzioni\n"
+           "  opzione         Opzione globale\n"
+           "  driver.opzione  Opzione specifica del driver/Override globale\n"
+           "\n"
+           "  jngctl opt list [driver]\n"
            "    Stampa le opzioni del driver e la loro descrizione\n"
+           "    Se driver non è specificato stampa le opzioni globali\n"
            "\n"
-           "  jngctl drv <driver> opt get [opzione]\n"
-           "    Stampa il valore dell'opzione. Se non è specificata stampa tutti i valori\n"
+           "  jngctl opt get <opzione|driver.|driver.opzione>\n"
+           "    Stampa il valore dell'opzione. Se si specifica solo driver. (punto letterale)\n"
+           "    stampa i valori di tutte le opzioni del driver\n"
            "\n"
-           "  jngctl drv <driver> opt set <opzione> <val>\n"
+           "  jngctl opt set <opzione|driver.opzione> <val>\n"
            "    Imposta l'opzione\n"
            "\n"
            "  jngctl help\n"
@@ -72,73 +78,62 @@ void usage(char* fmt, ...){
     exit(0);
 }
 
-int jngd_fd = -1;
-struct sockaddr_un jngd_addr;
-
-void jngd_connect(){
-    jngd_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-    if(jngd_fd < 0){
-        printf("Impossibile creare il socket locale\n");
-        exit(1);
-    }
-    
-    jngd_addr.sun_family = AF_UNIX;
-    strcpy(jngd_addr.sun_path, SOCKET_FILE);
-}
-
-void jngd_send(unsigned char* buffer, int len){
-    if(sendto(jngd_fd, buffer, len, 0, (struct sockaddr*)&jngd_addr, sizeof(jngd_addr.sun_family) + strlen(jngd_addr.sun_path) + 1) < 0){
-        printf("Impossibile inviare al socket locale.\nAssicurarsi che jngd sia attivo e di avere i permessi adeguati\n");
-        exit(1);
-    }
-}
+#define CHECK_RET(ret) do{if((ret) < 0){printf("Errore nell'esecuzione del comando: %s\n", strerror(-(ret)));return 1;}}while(0)
 
 int main(int argc, char* argv[]){
     if(argc < 2) usage(NULL);
     
-    int i;
+    int i, ret;
     
     if(strcmp(argv[1], "dlist") == 0){
-        DIR* dir = opendir("/etc/jngd/defs/");
-        if(!dir){
-            printf("Impossibile aprire la directory /etc/jngd/defs\n");
-            return 1;
+        char** list;
+        
+        ret = jngd_driver_list(&list);
+        CHECK_RET(ret);
+        
+        char** cursor;
+        ret = 0;
+        
+        for(cursor = list;*cursor;cursor++, ret++){
+            printf("%s\n", *cursor);
         }
-        printf("Driver installati:\n");
-        struct dirent* de;
-        while((de = readdir(dir)) != NULL){
-            if(strncmp(de->d_name, ".", 1)) printf("%s\n", de->d_name);
-        }
-        closedir(dir);
-        return 1;
+        
+        if(!ret) printf("Nessun driver installato\n");
+        
+        free(list);
+        
+        return 0;
     }
     
-    if(strcmp(argv[1], "drv") == 0){
-        if(argc < 4) usage("Il comando drv richiede almeno due argomenti");
+    if(strcmp(argv[1], "dlaunch") == 0){
+        if(argc < 3) usage("Il comando dlaunch richiede almeno un argomento");
         
-        char* driver = argv[2];
+        ret = jngd_driver_launch(argv[2], argv + 3);
         
-        if(strcmp(argv[3], "exec") == 0){
-            unsigned char buffer[32768];
-            char* packet = (char*)buffer + 1;
+        CHECK_RET(ret);
+        
+        return 0;
+    }
+    
+    if(strcmp(argv[1], "opt") == 0){
+        if(argc < 3) usage("Il comando opt richiede almeno un argomenti");
+        
+        if(strcmp(argv[2], "list") == 0){
+            jngd_option_t* opts;
             
-            buffer[0] = ACTION_DRV_LAUNCH;
+            // Uso argv[3] perché stringa o NULL va bene tutto
+            ret = jngd_drvoption_list(argv[3], &opts);
             
-            packet[0] = (unsigned char)strlen(driver) + 1;
-            strcpy(packet + 2, driver);
+            CHECK_RET(ret);
             
-            int arg_start = 2 + packet[0];
-            for(i = 4;i < argc;i++){
-                strcpy(packet + arg_start, argv[i]);
-                arg_start += strlen(argv[i]) + 1;
-            }
-            
-            packet[1] = arg_start - 2 - packet[0];
-            
-            jngd_connect();
-            jngd_send(buffer, 1+ 2 + packet[0] + packet[1]);
             return 0;
         }
+    }
+    
+    usage("Comando %s non riconosciuto", argv[1]);
+    return 1;
+    /*
+    
         
         if(strcmp(argv[3], "opt") == 0){
             if(argc < 5) usage("Il comando drv:opt richiede almeno un argomento");
@@ -237,6 +232,6 @@ int main(int argc, char* argv[]){
     }
     
     usage("Comando %s non riconosciuto", argv[1]);
-    return 0;
+    return 0;*/
 }
 

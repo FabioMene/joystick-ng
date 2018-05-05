@@ -315,14 +315,41 @@ int jngd_drvoption_list(const char* driver, jngd_option_t** list){
 }
 
 
+// Il nome driver per drvoption_get
+static char driver_name[256] = "";
+
+// Imposta il nome driver per drvoption_get
+// Questo permette di mantenere una certa compatibilità con libjngdsett
+// e la variabile d'ambiente JNG_DRIVER. Questo prefisso viene usato solo da drvoption_get
+void jngd_set_drvoption_driver(const char* driver){
+    if(driver){
+        strncpy(driver_name, driver, 255);
+        return;
+    }
+    
+    char* drv = getenv("JNG_DRIVER");
+    if(drv){
+        strncpy(driver_name, drv, 255);
+    }
+}
+
 // Ottieni un opzione
 int jngd_drvoption_get(const char* option, jngd_option_type_e type, void* dst){
+    char drvoption[256];
+    if(strlen(driver_name)){
+        strcpy(drvoption, driver_name);
+        strcat(drvoption, ".");
+        strcat(drvoption, option);
+    } else {
+        strcpy(drvoption, option);
+    }
+    
     unsigned char buffer[258];
     
     // Invia richiesta
     buffer[0] = JNGD_ACTION_DRVOPT_GET;
-    buffer[1] = (strlen(option) + 1) & 0xff;
-    memcpy(buffer + 2, option, buffer[1]);
+    buffer[1] = (strlen(drvoption) + 1) & 0xff;
+    memcpy(buffer + 2, drvoption, buffer[1]);
     
     if(_jngd_send(buffer, 2 + buffer[1]) < 0) return -EIO;
     

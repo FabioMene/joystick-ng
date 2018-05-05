@@ -24,15 +24,45 @@
 #ifndef JNGD_H
 #define JNGD_H 1
 
-#include <syslog.h>
+// Robe
+#include <stdlib.h>
+// File
+#include <unistd.h>
+// Socket UNIX
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+// altro
 #include <pthread.h>
-
+#include <errno.h>
+// Constanti di jngd
 #include "../libjngd-client/libjngd.h"
 
 
-#define printi(fmt...) syslog(LOG_INFO,    fmt);
-#define printw(fmt...) syslog(LOG_WARNING, fmt);
-#define printe(fmt...) syslog(LOG_ERR,     fmt);
+#ifdef DEBUG
+    #include <stdio.h>
+    
+    #define printinit() 
+    
+    #define printi(fmt...) do{printf("[II] " fmt);putchar('\n');}while(0)
+    #define printw(fmt...) do{printf("[WW] " fmt);putchar('\n');}while(0)
+    #define printe(fmt...) do{printf("[EE] " fmt);putchar('\n');}while(0)
+#else
+    // Macro per syslog
+    #include <syslog.h>
+    
+    #define printinit() do{close(0);close(1);close(2);openlog("jngd", LOG_CONS | LOG_PID, LOG_DAEMON);}while(0)
+    
+    #define printi(fmt...) syslog(LOG_INFO,    fmt);
+    #define printw(fmt...) syslog(LOG_WARNING, fmt);
+    #define printe(fmt...) syslog(LOG_ERR,     fmt);
+#endif
+
+
+//
+#define JNGD_DATA_PATH   "/etc/jngd"
+#define JNGD_GLOBAL_FILE "globals.def"
+#define JNGD_GLOBAL_OPT  "globals"
 
 
 //
@@ -58,6 +88,39 @@ extern pthread_mutex_t threads_mutex;
 int isUserElevated(int un_sock);
 
 
+/// Prototipi gestore opzioni. Tutte le funzioni ritornano 0 in caso di successo
+
+// Rappresentazione interna delle opzioni
+typedef struct {
+    jngd_option_type_e type;
+    unsigned char      is_override; // Viene considerata solo nella risoluzione
+    union {
+        struct { // Per opzioni normali
+            char name[256];
+            char def_value[256];
+            char value[256];
+            char description[512];
+        };
+        char path[512]; // Per exec=
+    };
+} internal_option_t;
+
+// Carica definizioni dei driver e globali, più le opzioni salvate
+extern int drvoption_load();
+
+// Carica il percorso eseguibile di driver in dst
+extern int drvoption_read_exec(char* driver, char* dst);
+
+// Duplica la lista di opzioni di driver (o, se NULL, quella globale) e la ritorna in dst
+extern int drvoption_dump_list(char* driver, internal_option_t** dst, int* dstnum);
+
+// Risolvi e leggi il valore di un opzione (nel formato driver.opzione o opzione).
+extern int drvoption_resolve_option(char* option, char* dst);
+
+// Scrivi un opzione (nel formato driver.opzione o opzione)
+extern int drvoption_update_option(char* option, char* src);
+
+
 /// Azioni. Se ritorna != 0 viene inviato solo il pacchetto di stato con quell'errore
 
 // Controlla che la lunghezza del pacchetto sia almeno min
@@ -68,4 +131,13 @@ int do_drv_launch(unsigned char* packet, int* len);
 int do_drv_list(unsigned char* packet, int* len);
 
 
+int do_drvopt_update(unsigned char* packet, int* len);
+
+int do_drvopt_list(unsigned char* packet, int* len);
+
+int do_drvopt_get(unsigned char* packet, int* len);
+
+int do_drvopt_set(unsigned char* packet, int* len);
+
 #endif
+

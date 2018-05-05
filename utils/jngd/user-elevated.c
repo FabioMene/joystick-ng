@@ -24,10 +24,6 @@
 #include <pwd.h>
 #include <grp.h>
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-
 #include "jngd.h"
 
 #ifndef GET_PEERCRED
@@ -56,6 +52,8 @@ int isUserElevated(int un_sock){
         return -1;
     }
     
+    if(cred.uid == 0) return 1;
+    
     // Ottieni il GID di ELEVATED_GROUP
     struct group* egrp;
     getgrnam_r(ELEVATED_GROUP, &gr_sto, gr_buffer, 8192, &egrp);
@@ -78,6 +76,7 @@ int isUserElevated(int un_sock){
         if(groups[i] == egrp->gr_gid) return 1;
     }
     
+    // Non è privilegiato
     return 0;
 }
 

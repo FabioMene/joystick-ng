@@ -26,7 +26,7 @@
 
 // Parametri di jngd
 // Di default il socket è leggibile e scrivibile solo per root e il gruppo input
-#define SOCKET_FILE    "test.sock" /*"/var/run/jngd.socket"*/
+#define SOCKET_FILE    "/tmp/test.sock" /*"/var/run/jngd.socket"*/
 #define ELEVATED_GROUP "input"
 
 // Le funzioni ritornano le costanti E* da errno.h
@@ -81,7 +81,7 @@ typedef enum {
 
     // Ottieni la lista di impostazioni globali o di un driver
     // [req]
-    //     1    len driver. Se il driver è nullo (len 0) ritorna il numero di opzioni globali
+    //     1    len driver. Se il driver è nullo (len 0) ritorna le opzioni globali
     //     len  driver
     // [resp]
     //     2    len elementi
@@ -98,7 +98,7 @@ typedef enum {
 
     // Ottieni il valore effettivo di un'opzione.
     // L'ordine di risoluzione è
-    //     driver.opzione > driver.globale > driver.predefinita > globale > predefinita globale
+    //     driver.opzione > driver.predefinita > globale > predefinita globale
     // Le opzioni predefinite sono considerate solo durante la risoluzione di un opzione
     // [req]
     //     1    len opzione
@@ -157,7 +157,12 @@ typedef struct {
     extern int jngd_drvoption_update();
     
     // Lista le opzioni di un driver. Se driver è NULL (o stringa vuota) ritorna le opzioni globali
+    // La lista viene allocata dinamicamente e deve essere rilasciata con free()
     extern int jngd_drvoption_list(const char* driver, jngd_option_t** list);
+    
+    // Imposta il nome driver per drvoption_get. Se driver è NULL lo deduce dalla variabile d'ambiente JNG_DRIVER
+    // Tutte le chiamate a drvoption_get successiva a questa saranno interpretate come driver "." opzione
+    extern void jngd_set_drvoption_driver(const char* driver);
     
     // Ottieni il valore di un'opzione. Il tipo si deve sapere in anticipo
     // La conversione avviene solo per TYPE_INT e TYPE_DOUBLE, gli altri tipi
