@@ -421,7 +421,7 @@ int client_loop(int ctrl, int intr){
             if(ps_shutdown){
                 if(report.ps == 0) ps_sd_time = now + ps_shutdown;
                 if(ps_sd_time < now){
-                    should_close = 1;
+                    should_close = 2;
                     close_cause  = "Tasto PS premuto per più di ps_timeout secondi";
                 }
             }
@@ -449,8 +449,40 @@ int client_loop(int ctrl, int intr){
     
     if(should_close){
         printi("Disconnessione: %s", close_cause);
-    } else {
-        printe("Connessione persa");
+        
+        if(should_close == 2){ // Per tasto PS
+            // Crea un pacchetto che fa lampeggiare tutti i led molto velocemente
+            unsigned char ds3_control_packet[50] = {
+                0x52, 0X01 // SET_REPORT, Output
+            };
+            
+            // Aggiunge l'effettivo pacchetto
+            memcpy(ds3_control_packet + 2, ds3_output_report_pkt, sizeof(ds3_output_report_pkt));
+
+            // Reset motori
+            ds3_control_packet[4] = 0x00;
+            ds3_control_packet[6] = 0x00;
+
+            // Tutti i led
+            ds3_control_packet[11] = 0x1e;
+
+            // Frequenza lampeggiamento
+            ds3_control_packet[15] = 0x08;
+            ds3_control_packet[16] = 0x08;
+            
+            ds3_control_packet[20] = 0x08;
+            ds3_control_packet[21] = 0x08;
+            
+            ds3_control_packet[25] = 0x08;
+            ds3_control_packet[26] = 0x08;
+            
+            ds3_control_packet[30] = 0x08;
+            ds3_control_packet[31] = 0x08;
+            
+            send(ctrl, ds3_control_packet, 50, 0);
+        } else {
+            printe("Connessione persa");
+        }
     }
     
     close(jngfd);
