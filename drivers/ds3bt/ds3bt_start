@@ -6,3 +6,5 @@ service bluetooth stop
 hciconfig hci0 up pscan
 
 jngctl drv ds3bt exec
+
+service bluetooth start

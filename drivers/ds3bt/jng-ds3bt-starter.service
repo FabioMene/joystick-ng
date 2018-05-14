@@ -4,9 +4,8 @@ Before=bluetooth.service
 After=joystick-ng.service
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/usr/local/bin/ds3bt_start
-RemainAfterExit=false
 
 [Install]
 WantedBy=multi-user.target
