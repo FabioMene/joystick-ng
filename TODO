@@ -1,0 +1,5 @@
+module/, jngd, jngctl:
+    Aggiungere un collegamento tra modulo kernel e jngd, per aggiungere funzionalità tipo
+        swap joystick
+        disconnessione soft dei joystick
+    il tutto con nuovi eventi CTRL per i driver
