@@ -236,12 +236,19 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
-int axis_deadzone = 10;
+static int axis_deadzone = 10;
 
-short get_threshold(char val){
+static short get_threshold(char val){
     val -= 128;
     if(val > -axis_deadzone && val < axis_deadzone) val = 0;
     return val << 8;
+}
+
+static unsigned long time_ds(){
+    static struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    
+    return ts.tv_sec * 10 + ts.tv_nsec / 1e8;
 }
 
 int client_loop(int ctrl, int intr){
@@ -253,11 +260,11 @@ int client_loop(int ctrl, int intr){
     unsigned char buffer[50];
     
     // Invia attivazione
-    unsigned char enable_msg[] = {
+    unsigned char enable_dsg[] = {
         0x53, // SET_REPORT, Feature
         0xf4, 0x42, 0x03, 0x00, 0x00
     };
-    send(ctrl, enable_msg, 6, 0);
+    send(ctrl, enable_dsg, 6, 0);
     recv(ctrl, buffer, 50, 0);
     
     // Inizializza jng
@@ -335,14 +342,16 @@ int client_loop(int ctrl, int intr){
     };
     
     // Legge le impostazioni
-    int timeout, ps_shutdown;
+    int timeout_ds, ps_shutdown_ds;
     
     jngd_drvoption_get("axis_deadzone",      JNGD_DRVOPT_TYPE_INT, &axis_deadzone); // Globale
     axis_deadzone >>= 8;
     
-    jngd_drvoption_get("inactivity_timeout", JNGD_DRVOPT_TYPE_INT, &timeout); // Globale
+    jngd_drvoption_get("inactivity_timeout", JNGD_DRVOPT_TYPE_INT, &timeout_ds); // Globale
+    timeout_ds *= 10;
     
-    jngd_drvoption_get("ps_shutdown",        JNGD_DRVOPT_TYPE_INT, &ps_shutdown);
+    jngd_drvoption_get("ps_shutdown",        JNGD_DRVOPT_TYPE_INT, &ps_shutdown_ds);
+    ps_shutdown_ds *= 10;
     
     jngd_drvoption_get("blink_leds",         JNGD_DRVOPT_TYPE_INT, &arg.blink);
     
@@ -353,8 +362,8 @@ int client_loop(int ctrl, int intr){
     
     
     // Per i casi di disconnessione
-    time_t inactivity_time = time(NULL) + timeout;
-    time_t ps_sd_time = time(NULL) + ps_shutdown;
+    unsigned long inactivity_time = time_ds() + timeout_ds;
+    unsigned long ps_sd_time = time_ds() + ps_shutdown_ds;
     
     int should_close = 0;
     char* close_cause = "";
@@ -365,7 +374,7 @@ int client_loop(int ctrl, int intr){
         // HID Data, Input (0xa1) Protocol code: keyboard (0x01) 
         if(!(buffer[0] == 0xa1 && buffer[1] == 0x01)) break;
         
-        time_t now = time(NULL);
+        unsigned long now = time_ds();
         
         // HID Modifiers: 0
         if(buffer[2] == 0x00){
@@ -418,8 +427,8 @@ int client_loop(int ctrl, int intr){
             write(jngfd, &state, sizeof(jng_state_t));
             
             // Controllo ps_shutdown
-            if(ps_shutdown){
-                if(report.ps == 0) ps_sd_time = now + ps_shutdown;
+            if(ps_shutdown_ds){
+                if(report.ps == 0) ps_sd_time = now + ps_shutdown_ds;
                 if(ps_sd_time < now){
                     should_close = 2;
                     close_cause  = "Tasto PS premuto per più di ps_timeout secondi";
@@ -434,8 +443,8 @@ int client_loop(int ctrl, int intr){
         }
         
         // Controllo timeout
-        if(timeout){
-            if(state.keys != 0) inactivity_time = now + timeout;
+        if(timeout_ds){
+            if(state.keys != 0) inactivity_time = now + timeout_ds;
             if(inactivity_time < now){
                 should_close = 1;
                 close_cause  = "inattività";
