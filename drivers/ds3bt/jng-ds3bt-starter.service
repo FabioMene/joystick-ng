@@ -5,7 +5,7 @@ After=joystick-ng.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/ds3bt_start
+ExecStart=/usr/local/bin/jng-ds3bt-start
 
 [Install]
 WantedBy=multi-user.target

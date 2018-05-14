@@ -1,3 +1,0 @@
-# joystick-ng driver ds3bt
-# Quando viene collegato un ds3 avvia il demone ds3bt (se abilitato, vedi l'impostazione driver 'autostart'), in caso di future connessioni
-ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="054c", ATTR{idProduct}=="0268", RUN+="/usr/local/bin/jngctl drv ds3bt exec autostart"

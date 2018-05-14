@@ -1,5 +1,5 @@
 all:
-	gcc -Wall main.c -o x360usbdrv -L../../utils/libjngdsett -ljngdsett -lusb
+	gcc -Wall main.c -o x360usbdrv -L../../utils/libjngd-client -ljngd-client -lusb
 
 install:
 	install -m 755 x360usbdrv /usr/local/share/jng/drivers/x360usb

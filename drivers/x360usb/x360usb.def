@@ -1,7 +1,5 @@
 # Configurazione per il driver x360usb
 exec=/usr/local/share/jng/drivers/x360usb
 
-axis_dz    = int    | 1000| La zona morta per gli assi (0 -> 32767)
-
 set_leds   = int    |  1  | Se 0 non viene impostato il led dal driver (solo feedback). Se 1 il led indica lo slot (da 1 a 4: un led fisso, da 5 a 8: un led lampeggiante, da 9: blink). Se 2 il driver imposta l'opzione fixed_leds
 fixed_leds = string |blink| Questa stringa indica come attivare i led (off, blink, slowblink, 1, 2, 3, 4, rotate)

@@ -43,7 +43,7 @@
 #include <bluetooth/l2cap.h>
 
 #include "../../include/joystick-ng.h"
-#include "../../utils/libjngdsett/libjngdsett.h"
+#include "../../utils/libjngd-client/libjngd.h"
 
 #include "../ds3/ds3-packets.h"
 
@@ -81,6 +81,8 @@ typedef struct {
     int jngfd;
     int ctrlfd;
     
+    int blink; // Dalle opzioni
+    
     unsigned char blevel;
 } sender_thread_arg_t;
 
@@ -99,10 +101,10 @@ int main(int argc, char* argv[]){
     openlog("jngd/ds3bt", LOG_CONS | LOG_PID, LOG_DAEMON);
     printi("Init");
     
-    jngdsett_load(NULL);
+    jngd_set_drvoption_driver(NULL);
     
     int autostart = 0;
-    jngdsett_read("autostart", &autostart);
+    jngd_drvoption_get("autostart", JNGD_DRVOPT_TYPE_INT, &autostart);
     
     int fd;
     
@@ -234,19 +236,17 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
+int axis_deadzone = 10;
 
 short get_threshold(char val){
     val -= 128;
-    if(val > -10 && val < 10) val = 0;
+    if(val > -axis_deadzone && val < axis_deadzone) val = 0;
     return val << 8;
 }
 
 int client_loop(int ctrl, int intr){
     // Imposta il signal handler di SIGTERM per questo processo
     signal(SIGTERM, client_sigterm_handler);
-    
-    // Ricarica la configurazione (per questo client)
-    jngdsett_load(NULL);
     
     // Variabili usate ovunque
     
@@ -276,7 +276,7 @@ int client_loop(int ctrl, int intr){
     ioctl(jngfd, JNGIOCSETEVMASK, JNG_EV_FB_FORCE | JNG_EV_FB_LED);
     
     int res;
-    jngdsett_read("set_leds", &res);
+    jngd_drvoption_get("set_leds", JNGD_DRVOPT_TYPE_INT, &res);
     if(res){
         // Questo dimostra la flessibilità di joystick-ng
         unsigned int slot;
@@ -290,7 +290,7 @@ int client_loop(int ctrl, int intr){
         char strres[256];
         
         if(res == 2){ // Led fissi
-            jngdsett_read("fixed_leds", strres);
+            jngd_drvoption_get("fixed_leds", JNGD_DRVOPT_TYPE_STRING, strres);
             l4 = strres[0] != '0';
             l3 = strres[1] != '0';
             l2 = strres[2] != '0';
@@ -334,13 +334,23 @@ int client_loop(int ctrl, int intr){
         .blevel = 255
     };
     
+    // Legge le impostazioni
+    int timeout, ps_shutdown;
+    
+    jngd_drvoption_get("axis_deadzone",      JNGD_DRVOPT_TYPE_INT, &axis_deadzone); // Globale
+    axis_deadzone >>= 8;
+    
+    jngd_drvoption_get("inactivity_timeout", JNGD_DRVOPT_TYPE_INT, &timeout); // Globale
+    
+    jngd_drvoption_get("ps_shutdown",        JNGD_DRVOPT_TYPE_INT, &ps_shutdown);
+    
+    jngd_drvoption_get("blink_leds",         JNGD_DRVOPT_TYPE_INT, &arg.blink);
+    
+    // Avvia il sender thread
     if(pthread_create(&sender_thread, NULL, sender_thread_loop, &arg) < 0){
         printw("Impossibile avviare il sender thread, no feedback disponibile");
     }
     
-    int timeout, ps_shutdown;
-    jngdsett_read("timeout",     &timeout);
-    jngdsett_read("ps_shutdown", &ps_shutdown);
     
     // Per i casi di disconnessione
     time_t inactivity_time = time(NULL) + timeout;
@@ -411,7 +421,7 @@ int client_loop(int ctrl, int intr){
             if(ps_shutdown){
                 if(report.ps == 0) ps_sd_time = now + ps_shutdown;
                 if(ps_sd_time < now){
-                    should_close = 1;
+                    should_close = 2;
                     close_cause  = "Tasto PS premuto per più di ps_timeout secondi";
                 }
             }
@@ -439,8 +449,40 @@ int client_loop(int ctrl, int intr){
     
     if(should_close){
         printi("Disconnessione: %s", close_cause);
-    } else {
-        printe("Connessione persa");
+        
+        if(should_close == 2){ // Per tasto PS
+            // Crea un pacchetto che fa lampeggiare tutti i led molto velocemente
+            unsigned char ds3_control_packet[50] = {
+                0x52, 0X01 // SET_REPORT, Output
+            };
+            
+            // Aggiunge l'effettivo pacchetto
+            memcpy(ds3_control_packet + 2, ds3_output_report_pkt, sizeof(ds3_output_report_pkt));
+
+            // Reset motori
+            ds3_control_packet[4] = 0x00;
+            ds3_control_packet[6] = 0x00;
+
+            // Tutti i led
+            ds3_control_packet[11] = 0x1e;
+
+            // Frequenza lampeggiamento
+            ds3_control_packet[15] = 0x08;
+            ds3_control_packet[16] = 0x08;
+            
+            ds3_control_packet[20] = 0x08;
+            ds3_control_packet[21] = 0x08;
+            
+            ds3_control_packet[25] = 0x08;
+            ds3_control_packet[26] = 0x08;
+            
+            ds3_control_packet[30] = 0x08;
+            ds3_control_packet[31] = 0x08;
+            
+            send(ctrl, ds3_control_packet, 50, 0);
+        } else {
+            printe("Connessione persa");
+        }
     }
     
     close(jngfd);
@@ -461,9 +503,6 @@ void* sender_thread_loop(void* varg){
     
     sender_thread_arg_t* arg = (sender_thread_arg_t*)varg;
     jng_event_t ev;
-    
-    int blink;
-    jngdsett_read("blink_leds", &blink);
     
     // Invia il primo pacchetto
     send(arg->ctrlfd, ds3_control_packet, 50, 0);
@@ -535,7 +574,7 @@ void* sender_thread_loop(void* varg){
                 break;
         }
         
-        if(blink && arg->blevel != lastblevel){
+        if(arg->blink && arg->blevel != lastblevel){
             lastblevel = arg->blevel;
             
             // Normale
