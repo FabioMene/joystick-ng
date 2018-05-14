@@ -5,7 +5,10 @@ if [ x"$(jngctl opt get ds3bt.autostart)" != x"0" ]; then
     # Start bluetooth pscan
     service bluetooth stop
     hciconfig hci0 up pscan
-    
+
     # Start bt server
     jngctl drv launch ds3bt autostart
+
+    # Restart bluetooth service
+    service bluetooth start
 fi
