@@ -51,8 +51,8 @@ static int jng_driver_open(struct inode* in, struct file* fp){
     // Trova un joystick libero
     spin_lock(&jng_joysticks_lock);
     for(i = 0;i < JNG_TOT;i++){
-        if(jng_joysticks[i].driven == 0){
-            jng_joysticks[i].driven          = 1;
+        if(jng_joysticks[i].driver == NULL){
+            jng_joysticks[i].driver          = jng_connection_data;
             jng_joysticks[i].state.connected = 1;
             jng_joysticks[i].info.connected  = 1;
             jng_joysticks[i].state_inc++; // Questo viene considerato evento di controllo
@@ -317,7 +317,7 @@ static int jng_driver_release(struct inode* in, struct file* fp){
     printi("Connessione con driver per il joystick %d chiusa", jng_connection_data->joystick->num);
     // Rilascio il joystick, poi i dati
     spin_lock(&jng_joysticks_lock);
-    jng_connection_data->joystick->driven          = 0;
+    jng_connection_data->joystick->driver          = NULL;
     jng_connection_data->joystick->state.connected = 0;
     jng_connection_data->joystick->info.connected  = 0;
     jng_connection_data->joystick->state_inc++; // Questo viene considerato evento di controllo

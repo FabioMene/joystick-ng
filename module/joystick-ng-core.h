@@ -38,6 +38,7 @@
 #define JNG_DRIVER_NAME "joystick-ng"
 
 // Il nome dei due device per drivers e devices, KERNEL in udev
+#define JNG_CONTROL_DEVICE_NAME "control"
 #define JNG_DRIVERS_DEVICE_NAME "driver"
 #define JNG_CLIENTS_DEVICE_NAME "device"
 
@@ -55,12 +56,15 @@
 #include "../include/joystick-ng.h"
 #include "queue.h"
 
+// Per la dipendenza ciclica
+struct jng_connection_s;
+
 // Rappresenta un joystick, NON necessariamente connesso
 typedef struct {
     unsigned int   num;
     
-    // 1 se un driver lo sta gestendo
-    int driven;
+    // Non NULL se un driver lo sta gestendo (Questa è la connessione col driver)
+    struct jng_connection_s* driver;
     
     jng_state_t    state;
     jng_feedback_t feedback;
@@ -82,7 +86,7 @@ typedef struct {
 } jng_joystick_t;
 
 // Dati connessione, valido per client e server
-typedef struct {
+typedef struct jng_connection_s {
     // Il joystick
     jng_joystick_t* joystick;
     
@@ -127,6 +131,7 @@ typedef struct {
 // Variabili globali esterne
 
 // Operazioni sui file, variano da client a driver
+extern struct file_operations joystick_ng_control_fops;
 extern struct file_operations joystick_ng_driver_fops;
 extern struct file_operations joystick_ng_client_fops;
 

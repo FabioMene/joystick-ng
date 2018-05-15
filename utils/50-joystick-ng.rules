@@ -1,2 +1,9 @@
 # Regole udev per joystick-ng
-SUBSYSTEM=="joystick-ng", OWNER="root", GROUP="input", MODE="0666"
+# jng/control: rw per root e input
+SUBSYSTEM=="joystick-ng", ENV{MINOR}=="0", OWNER="root", GROUP="input", MODE="0660"
+
+# jng/driver: rw per root e input
+SUBSYSTEM=="joystick-ng", ENV{MINOR}=="1", OWNER="root", GROUP="input", MODE="0660"
+
+# jng/device: rw per tutti
+SUBSYSTEM=="joystick-ng", ENV{MINOR}=="2", OWNER="root", GROUP="input", MODE="0666"
