@@ -46,12 +46,15 @@ static int jng_control_open(struct inode* in, struct file* fp){
     
     // Swap 0 e 1
     
+    jng_control_wlock();
+    
     // Blocca l'accesso ai joystick
     spin_lock(&jng_joysticks_lock);
     
     // Niente da scambiare
     if(jng_joysticks[a].driver == NULL && jng_joysticks[b].driver == NULL){
         spin_unlock(&jng_joysticks_lock);
+        jng_control_wunlock();
         return -EACCES;
     }
     
@@ -138,6 +141,8 @@ static int jng_control_open(struct inode* in, struct file* fp){
     write_unlock(&jng_joysticks[a].state_lock);
     
     spin_unlock(&jng_joysticks_lock);
+    
+    jng_control_wunlock();
     
     // Risveglia i driver solo se necessario
     if(wake_a_driver){

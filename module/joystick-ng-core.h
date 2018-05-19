@@ -37,7 +37,7 @@
 // Il nome dei due device e la classe sysfs. SUBSYSTEM in udev
 #define JNG_DRIVER_NAME "joystick-ng"
 
-// Il nome dei due device per drivers e devices, KERNEL in udev
+// Il nome dei tre device per controllo, driver e client, KERNEL in udev (penso)
 #define JNG_CONTROL_DEVICE_NAME "control"
 #define JNG_DRIVERS_DEVICE_NAME "driver"
 #define JNG_CLIENTS_DEVICE_NAME "device"
@@ -120,13 +120,34 @@ typedef struct jng_connection_s {
 // Scorciatoie tattica, da usare in joystick-ng-{driver,client}-fops.c dove struct file* fp è definito
 #define jng_connection_data    ((jng_connection_t*)fp->private_data)
 
-#define jng_state_rlock(conn)     read_lock(&conn->joystick->state_lock);
-#define jng_state_runlock(conn)   read_unlock(&conn->joystick->state_lock);
-#define jng_state_wlock(conn)     write_lock(&conn->joystick->state_lock);
-#define jng_state_wunlock(conn)   write_unlock(&conn->joystick->state_lock);
 
-#define jng_feedback_lock(conn)   spin_lock(&conn->joystick->feedback_lock);
-#define jng_feedback_unlock(conn) spin_unlock(&conn->joystick->feedback_lock);
+// Funzioni (ex macro) per bloccare/sbloccare gli spinlock
+
+static __always_inline void jng_state_rlock(jng_joystick_t* js){
+    read_lock(&js->state_lock);
+}
+
+static __always_inline void jng_state_runlock(jng_joystick_t* js){
+    read_unlock(&js->state_lock);
+}
+
+static __always_inline void jng_state_wlock(jng_joystick_t* js){
+    write_lock(&js->state_lock);
+}
+
+static __always_inline void jng_state_wunlock(jng_joystick_t* js){
+    write_unlock(&js->state_lock);
+}
+
+
+static __always_inline void jng_feedback_lock(jng_joystick_t* js){
+    spin_lock(&js->feedback_lock);
+}
+
+static __always_inline void jng_feedback_unlock(jng_joystick_t* js){
+    spin_unlock(&js->feedback_lock);
+}
+
 
 // Variabili globali esterne
 
@@ -138,6 +159,31 @@ extern struct file_operations joystick_ng_client_fops;
 // I joystick
 extern jng_joystick_t jng_joysticks[JNG_TOT];
 extern spinlock_t     jng_joysticks_lock;
+
+// Client e driver bloccano in lettura, le operazioni di controllo bloccano in scrittura
+// Questo è necessario quando si usa jng_connection_data->joystick
+extern rwlock_t       jng_control_lock;
+
+// Relative funzioni
+static __always_inline void jng_control_rlock(void){
+    read_lock(&jng_control_lock);
+}
+
+static __always_inline void jng_control_runlock(void){
+    read_unlock(&jng_control_lock);
+}
+
+// Questa macro blocca jng_control_lock, copia jng_connection_data->joystick in js e sblocca lo spinlock
+#define jng_control_copy_joystick(js) do{jng_control_rlock();(js) = jng_connection_data->joystick;jng_control_runlock();}while(0)
+
+
+static __always_inline void jng_control_wlock(void){
+    write_lock(&jng_control_lock);
+}
+
+static __always_inline void jng_control_wunlock(void){
+    write_unlock(&jng_control_lock);
+}
 
 
 // Aggiunge un evento sulla coda di lettura

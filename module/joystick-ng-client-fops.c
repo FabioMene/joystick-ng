@@ -67,13 +67,13 @@ static int jng_client_open(struct inode* in, struct file* fp){
 static int jng_update_client_incremental(jng_connection_t* conn){
     int return_val = -1;
     
-    jng_state_rlock(conn);
+    jng_state_rlock(conn->joystick);
     if(conn->r_inc != conn->joystick->state_inc){
         memcpy(&conn->tmpstate, &conn->joystick->state, sizeof(jng_state_t));
         return_val = 0;
         conn->r_inc = conn->joystick->state_inc;
     }
-    jng_state_runlock(conn);
+    jng_state_runlock(conn->joystick);
     
     return return_val;
 }
@@ -175,9 +175,9 @@ static ssize_t jng_client_read(struct file* fp, char __user* buffer, size_t len,
     // Mod normale
     if(len < sizeof(jng_state_t)) return -EINVAL;
     // copy_to_user può andare in sleep
-    jng_state_rlock(jng_connection_data);
+    jng_state_rlock(jng_connection_data->joystick);
     memcpy(&jng_connection_data->tmpstate, &jng_connection_data->joystick->state, sizeof(jng_state_t));
-    jng_state_runlock(jng_connection_data);
+    jng_state_runlock(jng_connection_data->joystick);
     return copy_to_user(buffer, &jng_connection_data->tmpstate, sizeof(jng_state_t)) ? -EFAULT : sizeof(jng_state_t);
 }
 
@@ -189,7 +189,7 @@ static ssize_t jng_client_write(struct file* fp, const char __user* buffer, size
         
         // Più joystick possono essere collegati allo stesso joystick, quindi la strategia adottata in jng_driver_write
         // non può essere utilizzata. Qui il blocco è totale
-        jng_feedback_lock(jng_connection_data);
+        jng_feedback_lock(jng_connection_data->joystick);
         switch(jng_connection_data->tmpevent.type){
             case JNG_EV_FB_FORCE:
                 jng_connection_data->tmpevent.what &= __JNG_FB_FORCE_MASK;
@@ -201,7 +201,7 @@ static ssize_t jng_client_write(struct file* fp, const char __user* buffer, size
                 break;
         }
         jng_connection_data->joystick->feedback_inc++;
-        jng_feedback_unlock(jng_connection_data);
+        jng_feedback_unlock(jng_connection_data->joystick);
         // Risveglia il driver se serve
         wake_up_interruptible(&jng_connection_data->joystick->feedback_queue);
         // fine
@@ -212,10 +212,10 @@ static ssize_t jng_client_write(struct file* fp, const char __user* buffer, size
     // copy_from_user può attendere
     // quindi la procedura è user->tmp --> lock --> tmp->joystick --> unlock
     if(copy_from_user(&jng_connection_data->tmpfeedback, buffer, sizeof(jng_feedback_t)) != 0) return -EFAULT;
-    jng_feedback_lock(jng_connection_data);
+    jng_feedback_lock(jng_connection_data->joystick);
     memcpy(&jng_connection_data->joystick->feedback, &jng_connection_data->tmpfeedback, sizeof(jng_feedback_t));
     jng_connection_data->joystick->feedback_inc++;
-    jng_feedback_unlock(jng_connection_data);
+    jng_feedback_unlock(jng_connection_data->joystick);
     wake_up_interruptible(&jng_connection_data->joystick->feedback_queue);
     return sizeof(jng_feedback_t);
 }
@@ -261,9 +261,9 @@ static int jng_client_fsync(struct file* fp, loff_t start, loff_t end, int datas
     
     // Aggiorna le differenze, solo se lo slot è stato impostato
     if(jng_connection_data->joystick != NULL){
-        jng_state_rlock(jng_connection_data);
+        jng_state_rlock(jng_connection_data->joystick);
         memcpy(&jng_connection_data->tmpstate, &jng_connection_data->joystick->state, sizeof(jng_state_t));
-        jng_state_runlock(jng_connection_data);
+        jng_state_runlock(jng_connection_data->joystick);
         memcpy(&jng_connection_data->diff.state, &jng_connection_data->tmpstate, sizeof(jng_state_t));
     }
     
@@ -276,6 +276,7 @@ static int jng_del_unwanted_events_cb(void* el, void* arg){
 
 static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long arg){
     int rc;
+    jng_info_t tmpinfo;
     
     // Evita di spammare messaggi di log per la selezione joystick, dato che tecnicamente
     // si possono leggere i dati di tutti e 32 i joystick da un solo fd
@@ -299,9 +300,12 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
         
         case JNGIOCGETINFO:
             if(jng_connection_data->joystick == NULL) return -EINVAL;
-            jng_state_rlock(jng_connection_data);
-            rc = copy_to_user((jng_info_t*)arg, &jng_connection_data->joystick->info, sizeof(jng_info_t));
-            jng_state_runlock(jng_connection_data);
+            
+            jng_state_rlock(jng_connection_data->joystick);
+                memcpy(&tmpinfo, &jng_connection_data->joystick->info, sizeof(jng_info_t));
+            jng_state_runlock(jng_connection_data->joystick);
+            
+            rc = copy_to_user((jng_info_t*)arg, &tmpinfo, sizeof(jng_info_t));
             return rc ?-EFAULT : 0;
         
         

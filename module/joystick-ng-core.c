@@ -59,6 +59,8 @@ static struct class* jng_class;
 jng_joystick_t jng_joysticks[JNG_TOT];
 DEFINE_SPINLOCK(jng_joysticks_lock);
 
+DEFINE_RWLOCK(jng_control_lock);
+
 // Inizializzazione
 static int __init jng_init(void){
     #define _init_fail(op, lbl) do{printe("Errore inizializzazione driver: " # op);goto init_rwd_ ## lbl;}while(0)
