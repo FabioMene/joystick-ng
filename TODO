@@ -3,3 +3,6 @@ module/, jngd, jngctl:
         swap joystick
         disconnessione soft dei joystick
     il tutto con nuovi eventi CTRL per i driver
+
+È necessario riorganizzare tutto il sistema di input/output:
+    Lettura solo in mod eventi

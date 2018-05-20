@@ -53,10 +53,7 @@ static int jng_driver_open(struct inode* in, struct file* fp){
     spin_lock(&jng_joysticks_lock);
     for(i = 0;i < JNG_TOT;i++){
         if(jng_joysticks[i].driver == NULL){
-            jng_joysticks[i].driver          = jng_connection_data;
-            jng_joysticks[i].state.connected = 1;
-            jng_joysticks[i].info.connected  = 1;
-            jng_joysticks[i].state_inc++; // Questo viene considerato evento di controllo
+            jng_joysticks[i].driver = jng_connection_data;
             break;
         }
     }
@@ -64,9 +61,18 @@ static int jng_driver_open(struct inode* in, struct file* fp){
     if(i == JNG_TOT) _open_fail(no joystick free, EMFILE, free_joystick);
     
     // Trovato il joystick, ultime cose
-    jng_control_rlock();
-    js = jng_connection_data->joystick = jng_joysticks + i;
-    jng_control_runlock();
+    jng_control_wlock();
+        js = jng_connection_data->joystick = jng_joysticks + i;
+        
+        jng_state_wlock(js);
+        
+        js->state.connected = 1;
+        js->info.connected  = 1;
+        js->state_inc++; // Questo viene considerato evento di controllo
+        
+        jng_state_wunlock(js);
+    
+    jng_control_wunlock();
     
     jng_connection_data->mode     = JNG_MODE_NORMAL;
     jng_connection_data->evmask   = JNG_EV_FB_FORCE | JNG_EV_FB_LED;
@@ -335,21 +341,27 @@ static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
 
 static int jng_driver_release(struct inode* in, struct file* fp){
     jng_joystick_t* js;
-    jng_control_copy_joystick(js);
     
-    printi("Connessione con driver per il joystick %d chiusa", js->num);
-    // Rilascio il joystick, poi i dati
+    jng_control_wlock();
     spin_lock(&jng_joysticks_lock);
-    js->driver          = NULL;
+    
+    js = jng_connection_data->joystick;
+    js->driver = NULL;
+    
+    // Rilascio il joystick, poi i dati
     js->state.connected = 0;
     js->info.connected  = 0;
     js->state_inc++; // Questo viene considerato evento di controllo
     memset(&js->state, 0, sizeof(jng_state_t));
+    
     spin_unlock(&jng_joysticks_lock);
+    jng_control_wunlock();
     
     wake_up_interruptible(&js->state_queue); // Risveglia i client in ascolto
     
     kfree(fp->private_data);
+    
+    printi("Connessione con driver per il joystick %d chiusa", js->num);
     return 0;
 }
 
