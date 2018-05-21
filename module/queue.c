@@ -27,10 +27,15 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/gfp.h>
+#include <linux/spinlock.h>
 
 #include "queue.h"
 
+#define RET_UNLOCK(v) do{spin_unlock(&q->access_spinlock); return (v);}while(0)
+
 void jng_queue_init(jng_queue_t* q, int es, int ql){
+    spin_lock_init(&q->access_spinlock);
+    
     q->buffer = NULL;
     q->buflen = 0;
     q->element_len   = es;
@@ -39,20 +44,24 @@ void jng_queue_init(jng_queue_t* q, int es, int ql){
 
 
 int jng_queue_add(jng_queue_t* q, void* el){
-    if(q->buflen == q->element_limit) return -1;
+    spin_lock(&q->access_spinlock);
+    
+    if(q->buflen == q->element_limit) RET_UNLOCK(-1);
     q->buffer = krealloc(q->buffer, (++q->buflen) * q->element_len, GFP_KERNEL);
     if(!q->buffer){
         q->buffer = NULL;
         q->buflen = 0;
-        return -1;
+        RET_UNLOCK(-1);
     }
     memcpy(q->buffer + (q->buflen - 1) * q->element_len, el, q->element_len);
-    return 0;
+    RET_UNLOCK(0);
 }
 
 
 int jng_queue_pop(jng_queue_t* q, void* dest){
-    if(q->buflen == 0) return -1;
+    spin_lock(&q->access_spinlock);
+    
+    if(q->buflen == 0) RET_UNLOCK(-1);
     memcpy(dest, q->buffer, q->element_len);
     if(q->buflen != 1){
         memmove(q->buffer, q->buffer + q->element_len, (q->buflen - 1) * q->element_len);
@@ -63,19 +72,27 @@ int jng_queue_pop(jng_queue_t* q, void* dest){
     } else {
         q->buffer = krealloc(q->buffer, q->buflen * q->element_len, GFP_KERNEL);
     }
-    return 0;
+    RET_UNLOCK(0);
 }
 
 
 int jng_queue_get(jng_queue_t* q, void* dest, int pos){
-    if(pos < 0) return -1;
-    if(pos >= q->buflen) return -1;
+    spin_lock(&q->access_spinlock);
+    
+    if(pos < 0) RET_UNLOCK(-1);
+    if(pos >= q->buflen) RET_UNLOCK(-1);
     memcpy(dest, q->buffer + pos * q->element_len, q->element_len);
-    return 0;
+    RET_UNLOCK(0);
 }
 
 unsigned int jng_queue_len(jng_queue_t* q){
-    return q->buflen;
+    unsigned int len;
+    
+    spin_lock(&q->access_spinlock);
+        len = q->buflen;
+    spin_unlock(&q->access_spinlock);
+    
+    return len;
 } 
 
 //   _ _ _ _ _ 
@@ -89,30 +106,39 @@ unsigned int jng_queue_len(jng_queue_t* q){
 //  
 
 int jng_queue_del(jng_queue_t* q, int pos){
-    if(pos < 0) return -1;
-    if(pos >= q->buflen) return -1;
+    spin_lock(&q->access_spinlock);
+    
+    if(pos < 0) RET_UNLOCK(-1);
+    if(pos >= q->buflen) RET_UNLOCK(-1);
     if(pos != q->buflen - 1) memmove(q->buffer + pos * q->element_len, q->buffer + (pos + 1) * q->element_len, (q->buflen - pos - 1) * q->element_len);
     q->buffer = krealloc(q->buffer, (--q->buflen) * q->element_len, GFP_KERNEL);
     if(q->buflen == 0) q->buffer = NULL;
-    return 0;
+    RET_UNLOCK(0);
 }
 
 
 int jng_queue_delcb(jng_queue_t* q, int(*cb)(void*, void*), void* arg){
     int i, n = 0;
+    
+    spin_lock(&q->access_spinlock);
+    
     for(i = q->buflen - 1;i >= 0;i--){
         if(cb(q->buffer + i * q->element_len, arg)){
             jng_queue_del(q, i);
             n++;
         }
     }
-    return n;
+    RET_UNLOCK(n);
 }
 
 
 void jng_queue_delall(jng_queue_t* q){
+    spin_lock(&q->access_spinlock);
+    
     kfree(q->buffer);
     q->buffer = NULL;
     q->buflen = 0;
+    
+    spin_unlock(&q->access_spinlock);
 }
 

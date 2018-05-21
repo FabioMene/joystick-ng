@@ -38,7 +38,8 @@ typedef struct {
 } table_entry_t;
 
 table_entry_t control_table[] = {
-    {JNG_CTRL_CONNECTED, "Connected"},
+    {JNG_CTRL_CONNECTION,   "Connection"},
+    {JNG_CTRL_INFO_CHANGED, "Info Changed"},
     {0}
 };
 
@@ -110,13 +111,18 @@ unsigned int table_lookup_val(table_entry_t* table, char* name){
     return table[i].value;
 }
 
+char lookup_buffer[1024];
+
 char* table_lookup_name(table_entry_t* table, unsigned int value){
     int i = 0;
     while(table[i].value){
         if(table[i].value == value) return table[i].name;
         i++;
     }
-    return "(unknown)";
+
+    snprintf(lookup_buffer, 1023, "(unknown: %d)", value);
+    
+    return lookup_buffer;
 }
 
 
@@ -224,7 +230,7 @@ int main(int argc, char* argv[]){
         }; break;
         case 'R': {
             jng_feedback_t fb;
-            ioctl(fd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_NORMAL);
+            ioctl(fd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_BLOCK);
             memset(&fb, 0, sizeof(jng_feedback_t));
             write(fd, &fb, sizeof(jng_feedback_t));
             ioctl(fd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_EVENT);
@@ -243,23 +249,31 @@ int main(int argc, char* argv[]){
         unsigned int i;
         
         printf("Joystick connesso: %s\n", info.connected ? "sì" : "no");
+        
         printf("Nome: %s\n", info.name);
+        
+        printf("Alimentazione: %s\n", info.on_battery ? "batteria" : "cavo");
+        
         printf("Input\n  Tasti presenti: ");
         for(i = 1;i <= JNG_KEY_MAX;i <<= 1){
             if(info.keys & i) printf("%s ", table_lookup_name(key_table, i));
         }
+        
         printf("\n  Assi presenti: ");
         for(i = 1;i <= JNG_AXIS_MAX;i <<= 1){
             if(info.axis & i) printf("%s ", table_lookup_name(axis_table, i));
         }
+        
         printf("\n  Sensori presenti: ");
         for(i = 1;i <= JNG_SEN_MAX;i <<= 1){
             if(info.sensors & i) printf("%s ", table_lookup_name(sensor_table, i));
         }
+        
         printf("\nFeedback\n  Motori presenti: ");
         for(i = 1;i <= JNG_FB_FORCE_MAX;i <<= 1){
             if(info.fb_force & i) printf("%s ", table_lookup_name(fb_force_table, i));
         }
+        
         printf("\n  Led presenti: ");
         for(i = 1;i <= JNG_FB_LED_MAX;i <<= 4){
             if(info.fb_led & i){
@@ -269,6 +283,7 @@ int main(int argc, char* argv[]){
                 printf(" ");
             }
         }
+        
         printf("\nFlags\n");
         if(info.flags & JNG_FLAG_KEY_PRESSURE){
             printf("  KEY_PRESSURE: il joystick supporta la lettura della pressione su questi tasti\n    ");

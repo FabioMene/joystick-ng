@@ -45,19 +45,20 @@
 #define POLL_TIME_USEC 5000 // 5ms
 
 jng_info_t jng_info = {
-    .name      = "Sony DualShock3",
-    .keys      = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_L3 | JNG_KEY_R3 | JNG_KEY_DIRECTIONAL | JNG_KEY_START | JNG_KEY_SELECT | JNG_KEY_OPTIONS1,
-    .axis      = JNG_AXIS_LX | JNG_AXIS_LY | JNG_AXIS_RX | JNG_AXIS_RY,
-    .sensors   = JNG_SEN_ACCEL_X | JNG_SEN_ACCEL_Y | JNG_SEN_ACCEL_Z | JNG_SEN_GYRO_X,
-    .fb_force  = JNG_FB_FORCE_BIGMOTOR | JNG_FB_FORCE_SMALLMOTOR,
-    .fb_led    = JNG_FB_LED_1 | JNG_FB_LED_2 | JNG_FB_LED_3 | JNG_FB_LED_4,
-    .flags     = JNG_FLAG_KEY_PRESSURE,
-    .keyp      = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_DIRECTIONAL
+    .name       = "Sony DualShock3",
+    .on_battery = 0,
+    .keys       = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_L3 | JNG_KEY_R3 | JNG_KEY_DIRECTIONAL | JNG_KEY_START | JNG_KEY_SELECT | JNG_KEY_OPTIONS1,
+    .axis       = JNG_AXIS_LX | JNG_AXIS_LY | JNG_AXIS_RX | JNG_AXIS_RY,
+    .sensors    = JNG_SEN_ACCEL_X | JNG_SEN_ACCEL_Y | JNG_SEN_ACCEL_Z | JNG_SEN_GYRO_X,
+    .fb_force   = JNG_FB_FORCE_BIGMOTOR | JNG_FB_FORCE_SMALLMOTOR,
+    .fb_led     = JNG_FB_LED_1 | JNG_FB_LED_2 | JNG_FB_LED_3 | JNG_FB_LED_4,
+    .flags      = JNG_FLAG_KEY_PRESSURE,
+    .keyp       = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_DIRECTIONAL
 };
 
 jng_state_t state;
 
-jng_feedback_t feedback;
+jng_event_t event;
 
 usb_dev_handle* handle;
 int interface;
@@ -72,18 +73,47 @@ int axis_deadzone = 10;
 
 int blink_leds = 0;
 
-void ds3_set_feedback(int cstate){
-    // Motori
-    ds3_control_packet[2] = ((unsigned int)feedback.force.smallmotor) ? 255 : 0;
-    ds3_control_packet[4] = ((unsigned int)feedback.force.bigmotor) >> 8;
+int set_led_on_slot_change = 0;
+
+void ds3_update_feedback(int cstate){
+    switch(event.type){
+        case JNG_EV_CTRL:
+            if(event.what == JNG_CTRL_SLOT_CHANGED && set_led_on_slot_change){
+                int slot = event.value;
+                
+                ds3_control_packet[9] = 0;
+                
+                if(slot == 0 || slot == 4 || slot == 7 || slot >= 9) ds3_control_packet[9] |= 0x02;
+                if(slot == 1 || slot == 5 || slot >= 8) ds3_control_packet[9] |= 0x04;
+                if(slot == 2 || slot >= 6) ds3_control_packet[9] |= 0x08;
+                if(slot >= 3) ds3_control_packet[9] |= 0x10;
+            }
+            break;
+        
+        case JNG_EV_FB_FORCE:
+            if(event.what == JNG_FB_FORCE_SMALLMOTOR)
+                ds3_control_packet[2] = event.value ? 255 : 0;
+            else if(event.what == JNG_FB_FORCE_BIGMOTOR)
+                ds3_control_packet[4] = event.value >> 8;
+            break;
+        
+        case JNG_EV_FB_LED:
+            if(event.what == JNG_FB_LED_1){
+                if(event.value) ds3_control_packet[9] |=  0x02;
+                else            ds3_control_packet[9] &= ~0x02;
+            } else if(event.what == JNG_FB_LED_2){
+                if(event.value) ds3_control_packet[9] |=  0x04;
+                else            ds3_control_packet[9] &= ~0x04;
+            } else if(event.what == JNG_FB_LED_3){
+                if(event.value) ds3_control_packet[9] |=  0x08;
+                else            ds3_control_packet[9] &= ~0x08;
+            } else if(event.what == JNG_FB_LED_4){
+                if(event.value) ds3_control_packet[9] |=  0x10;
+                else            ds3_control_packet[9] &= ~0x10;
+            }
+            break;
+    }
     
-    // Led
-    ds3_control_packet[9] = 0;
-    if(feedback.leds.led1) ds3_control_packet[9] |= 0x02;
-    if(feedback.leds.led2) ds3_control_packet[9] |= 0x04;
-    if(feedback.leds.led3) ds3_control_packet[9] |= 0x08;
-    if(feedback.leds.led4) ds3_control_packet[9] |= 0x10;
-     
     // Lampeggiamento led
     unsigned char Toff = 0x00;
     if(blink_leds && cstate != 3) Toff = 0x40;
@@ -91,12 +121,6 @@ void ds3_set_feedback(int cstate){
     ds3_control_packet[18] = Toff;
     ds3_control_packet[23] = Toff;
     ds3_control_packet[28] = Toff;
-    
-    // Invio dati
-    int ur = usb_control_msg(handle, USB_ENDPOINT_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE, 0x09, 0x0201, 0, (char*)ds3_control_packet, 48, 100);
-    if(ur < 0){
-        printw("invio dati usb: %d\n", ur);
-    }
 }
 
 short get_threshold(char val){
@@ -211,10 +235,15 @@ int main(int argc, char* argv[]){
     char ds3_setup_cmd[4] = {0x42, 0x0c, 0x00, 0x00};
     if((usb_ret = usb_control_msg(handle, USB_ENDPOINT_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE, 0x09, 0x03f4, 0, ds3_setup_cmd, 4, 100)) < 0) die("control setup fallito: %d\n", usb_ret);
     
+    // Usato nel mainloop
+    int feedback_changed = 0;
+    
     // ORA possiamo gestire jng
     
-    jngfd = open("/dev/jng/driver", O_RDWR);
+    jngfd = open("/dev/jng/driver", O_RDWR | O_NONBLOCK);
     if(jngfd < 0) return 1;
+    
+    ioctl(jngfd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_BLOCK);
     
     // SO. So che le ioctl non falliscono, alias faccio quello che voglio
     ioctl(jngfd, JNGIOCSETINFO, &jng_info);
@@ -224,14 +253,6 @@ int main(int argc, char* argv[]){
     
     jngd_drvoption_get("set_leds", JNGD_DRVOPT_TYPE_INT, &res);
     if(res){
-        // Questo dimostra la flessibilità di joystick-ng
-        unsigned int slot;
-        ioctl(jngfd, JNGIOCGETSLOT, &slot);
-        
-        int dfd = open("/dev/jng/device", O_RDWR);
-        ioctl(dfd, JNGIOCSETSLOT, slot);
-        ioctl(dfd, JNGIOCSETMODE, JNG_MODE_EVENT);
-        
         int l1 = 0, l2 = 0, l3 = 0, l4 = 0;
         char strres[256];
         
@@ -242,6 +263,8 @@ int main(int argc, char* argv[]){
             l2 = strres[2] != '0';
             l1 = strres[3] != '0';
         } else { // In base allo slot
+            set_led_on_slot_change = 1;
+            
             slot += 1;
             if(slot == 1 || slot == 5 || slot == 8 || slot >= 10) l1 = 1;
             if(slot == 2 || slot == 6 || slot >= 9) l2 = 1;
@@ -249,26 +272,13 @@ int main(int argc, char* argv[]){
             if(slot >= 4) l4 = 1;
         }
         
-        jng_event_t ev;
-        ev.type = JNG_EV_FB_LED;
+        ds3_control_packet[9] = 0;
+        if(l1) ds3_control_packet[9] |= 0x02;
+        if(l2) ds3_control_packet[9] |= 0x04;
+        if(l3) ds3_control_packet[9] |= 0x08;
+        if(l4) ds3_control_packet[9] |= 0x10;
         
-        ev.what  = JNG_FB_LED_1;
-        ev.value = l1;
-        write(dfd, &ev, sizeof(jng_event_t));
-        
-        ev.what  = JNG_FB_LED_2;
-        ev.value = l2;
-        write(dfd, &ev, sizeof(jng_event_t));
-        
-        ev.what  = JNG_FB_LED_3;
-        ev.value = l3;
-        write(dfd, &ev, sizeof(jng_event_t));
-        
-        ev.what  = JNG_FB_LED_4;
-        ev.value = l4;
-        write(dfd, &ev, sizeof(jng_event_t));
-        
-        close(dfd);
+        feedback_changed = 1;
     }
     
     jngd_drvoption_get("axis_deadzone", JNGD_DRVOPT_TYPE_INT, &axis_deadzone); // Globali
@@ -322,10 +332,17 @@ int main(int argc, char* argv[]){
         
         write(jngfd, &state, sizeof(jng_state_t));
         
-        // Passa da jng_feedback_t al joystick
-        read(jngfd, &feedback, sizeof(jng_feedback_t));
-        
-        ds3_set_feedback(report.cstate);
+        // Passa da jng_feedback_ex_t al joystick
+        if(read(jngfd, &event, sizeof(jng_event_t)) > 0){
+            ds3_update_feedback(report.cstate);
+            
+            feedback_changed = 1;
+        } else if(feedback_changed){
+            int ur = usb_control_msg(handle, USB_ENDPOINT_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE, 0x09, 0x0201, 0, (char*)ds3_control_packet, 48, 100);
+            if(ur < 0){
+                printw("invio dati usb: %d\n", ur);
+            } else feedback_changed = 0;
+        }
         
         // Aspetta un po, per non sovraccaricare la CPU
         usleep(POLL_TIME_USEC);

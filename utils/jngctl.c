@@ -129,7 +129,7 @@ int main(int argc, char* argv[]){
             return 0;
         }
         
-        usage("Comando drv:%s non riconosciuto\n");
+        usage("Comando drv:%s non riconosciuto\n", argv[2]);
         return 1;
     }
     

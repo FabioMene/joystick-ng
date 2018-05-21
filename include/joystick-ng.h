@@ -49,12 +49,10 @@
 
 #include <linux/types.h>
 
-// INPUT (per il client)
+// OUTPUT (per il client)
 
-// Stato del joystick (si ottiene da read in modalità normale)
+// Stato del joystick (si ottiene da read in modalità a blocchi)
 typedef struct {
-    /// Indicatore di stato. Questo campo è gestito dal kernel
-    unsigned short connected;
     /// Tasti
     unsigned int keys;
     // Se il joystick supporta la lettura della pressione i dati appaiono qui, altrimenti i valori sono 0 e 255
@@ -117,19 +115,72 @@ typedef struct {
     } gyrometer;
 } jng_state_t;
 
-// Evento joystick. what contiene UN SOLO BIT (si ottiene da read in mod evento, ovviamente). Può essere usato anche in output
+
+// Eventi di controllo client
+typedef struct {
+    unsigned char connected;
+    unsigned int  last_info_inc; // L'incrementale dell'ultima volta che sono state impostate le info
+} jng_client_control_t;
+
+// Eventi di controllo driver
+typedef struct {
+    unsigned int slot;
+} jng_driver_control_t;
+
+// In modalità a blocchi se si leggono sizeof(jng_state_t) + sizeof(jng_client_control_t) bytes
+// read() legge entrambe le strutture (in sequenza). Queste strutture sono messe qui per convenienza
+// Per i driver legge jng_feedback_t e jng_driver_control_t. La struttura jng_feedback_ex_t 
+// è definita più in basso
+
+typedef struct {
+    jng_state_t          state;
+    jng_client_control_t control;
+} jng_state_ex_t;
+
+
+// Evento. what contiene UN SOLO BIT (si ottiene da read in mod evento, ovviamente). 
+// Può essere usato sia con read() che con write()
+
+// Evento semplice. Viene usato quando si legge da un solo joystick o
+// in modalità di lettura aggregata
+// I driver possono usare solo questo tipo di evento
+typedef struct {
+    unsigned short type;   // JNG_EV_* 
+    unsigned int   what;   // JNG_type_*
+    int            value;  // Il range del valore dipende dal tipo
+} jng_event_t;
+
+// Evento esteso, solo per client.
+// In lettura num contiene il numero del joystick che ha generato l'evento,
+// in scrittura indica il numero di joystick a cui inviare l'evento
 typedef struct {
     unsigned short type;
     unsigned int   what;
     int            value;
-} jng_event_t;
+    unsigned short num;  // Numero del joystick che ha generato l'evento
+} jng_event_ex_t;
 
-// Eventi di controllo
+
+
+// Eventi di controllo. Questi eventi vengono inviati dal kernel
 #define JNG_EV_CTRL        0x0001
 
-#define JNG_CTRL_CONNECTED 0x00000001
+/// Inviati ai client
 
-#define __JNG_CTRL_MASK    0x00000001
+// È cambiata la connessione del joystick.
+// value contiene 0 se non connesso, nonzero se connesso
+#define JNG_CTRL_CONNECTION   0x00000001 
+
+// Sono cambiate le info del joystick. value non ha significato
+#define JNG_CTRL_INFO_CHANGED 0x00000002
+
+/// Inviati ai driver
+// È cambiato lo slot assegnato al driver
+#define JNG_CTRL_SLOT_CHANGED 0x00010001
+
+#define __JNG_CLIENT_CTRL_MASK    0x00000003
+#define __JNG_DRIVER_CTRL_MASK    0x00010001
+
 
 // I tasti del joystick. Il modello è quello PS/Xbox
 #define JNG_EV_KEY       0x0002
@@ -201,6 +252,7 @@ typedef struct {
 
 #define __JNG_SEN_MASK   0x0000003f
 
+
 // OUTPUT (per il client)
 
 typedef struct {
@@ -226,6 +278,11 @@ typedef struct {
         unsigned int led4;
     } leds;
 } jng_feedback_t;
+
+typedef struct {
+    jng_feedback_t       feedback;
+    jng_driver_control_t control;
+} jng_feedback_ex_t;
 
 // Force Feedback
 #define JNG_EV_FB_FORCE          0x0010
@@ -270,23 +327,28 @@ typedef struct {
 // JNG_FB_LED_*_{RGB,LUM} vengono usati solo in info
 #define __JNG_FB_LED_MASK        0x00001111
 
+
 // IOCTL e strutture relative
 
 // Per JNGIOCGETINFO
 typedef struct {
-    unsigned short connected; // Se è 0 i dati seguenti non sono attendibili. Questo campo è gestito dal kernel
-    unsigned char  name[256]; // Il nome del joystick
-    unsigned int   keys;      // I bit settati equivalgono ai tasti presenti sul joystick (JNG_KEY_*)
-    unsigned int   axis;      // Come keys, per gli assi (JNG_AXIS_*)
-    unsigned int   sensors;   // JNG_SEN_*
+    unsigned char connected; // Se è 0 i dati seguenti non sono attendibili. Questo campo è gestito dal kernel
     
-    unsigned int   fb_force;  // JNG_FB_FORCE_*
-    unsigned int   fb_led;    // JNG_FB_LED_*
+    unsigned char on_battery; // Se è 0 il controller è alimentato, se nonzero a batteria
     
-    unsigned int   flags;     // Vari flag relativi al joystick (JNG_FLAG_*)
+    unsigned char name[256]; // Il nome del joystick
+    unsigned int  keys;      // I bit settati equivalgono ai tasti presenti sul joystick (JNG_KEY_*)
+    unsigned int  axis;      // Come keys, per gli assi (JNG_AXIS_*)
+    unsigned int  sensors;   // JNG_SEN_*
     
-    unsigned int   keyp;      // I bit settati equivalgono ai tasti (dejavu) che supportano la pressione variabile
+    unsigned int  fb_force;  // JNG_FB_FORCE_*
+    unsigned int  fb_led;    // JNG_FB_LED_*
+    
+    unsigned int  flags;     // Vari flag relativi al joystick (JNG_FLAG_*)
+    
+    unsigned int  keyp;      // I bit settati equivalgono ai tasti (dejavu) che supportano la pressione variabile
 } jng_info_t;
+
 
 // I flag indicano le caratteristiche specifiche di ogni joystick
 
@@ -294,14 +356,14 @@ typedef struct {
 
 
 // Per JNGIOCSETMODE
-#define JNG_RMODE_NORMAL 0x00
-#define JNG_RMODE_EVENT  0x01
+#define JNG_RMODE_BLOCK 0x00
+#define JNG_RMODE_EVENT 0x01
 
-#define JNG_WMODE_NORMAL 0x00
-#define JNG_WMODE_EVENT  0x02
+#define JNG_WMODE_BLOCK 0x00
+#define JNG_WMODE_EVENT 0x02
 
-#define JNG_MODE_NORMAL  (JNG_RMODE_NORMAL | JNG_WMODE_NORMAL)
-#define JNG_MODE_EVENT   (JNG_RMODE_EVENT  | JNG_WMODE_EVENT)
+#define JNG_MODE_BLOCK (JNG_RMODE_BLOCK | JNG_WMODE_BLOCK)
+#define JNG_MODE_EVENT (JNG_RMODE_EVENT | JNG_WMODE_EVENT)
 
 
 #define JNG_IOCTL_TYPE 'j'

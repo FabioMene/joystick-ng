@@ -72,31 +72,34 @@ static int jng_control_open(struct inode* in, struct file* fp){
         
         
         // Aggiorna il joystick 'ora connesso'
-        jng_joysticks[n_conn].driver    = jng_joysticks[n_notconn].driver;
+        jng_joysticks[n_conn].driver = jng_joysticks[n_notconn].driver;
         memcpy(&jng_joysticks[n_conn].info, &jng_joysticks[n_notconn].info, sizeof(jng_info_t));
         
         jng_joysticks[n_conn].driver->joystick = jng_joysticks + n_conn;
         jng_joysticks[n_conn].driver->r_inc    = jng_joysticks[n_conn].feedback_inc;
         
-        // Genera evento connesso
-        jng_joysticks[n_conn].state.connected  = 1;
-        jng_joysticks[n_conn].info.connected   = 1;
+        // JNG_CTRL_CONNECTION
+        jng_joysticks[n_conn].state_ex.control.connected = 1;
         
-        // Rigenera eventi client e driver
+        // JNG_CTRL_INFO_CHANGED
+        jng_joysticks[n_conn].state_ex.control.last_info_inc = jng_joysticks[n_conn].state_inc + 1;
+        
+        // Notifica che ci sono nuovi eventi di stato
         jng_joysticks[n_conn].state_inc++;
+        
+        // JNG_CTRL_SLOT_CHANGED
+        jng_joysticks[n_conn].feedback_ex.control.slot = n_conn;
         jng_joysticks[n_conn].feedback_inc++;
         
         
         // Aggiorna il joystick 'ora disconnesso'
         jng_joysticks[n_notconn].driver = NULL;
         
-        // Genera evento connesso
-        jng_joysticks[n_notconn].state.connected  = 0;
-        jng_joysticks[n_notconn].info.connected   = 0;
-        
-        // Rigenera eventi client e driver
+        // JNG_CTRL_CONNECTION
+        jng_joysticks[n_notconn].info.connected = 0;
+        jng_joysticks[n_notconn].state_ex.control.connected = 0;
         jng_joysticks[n_notconn].state_inc++;
-        jng_joysticks[n_notconn].feedback_inc++;
+        
         
         // Risveglia solo l'unico driver che può essere in attesa
         wake_a_driver = n_conn == a;
@@ -117,15 +120,24 @@ static int jng_control_open(struct inode* in, struct file* fp){
         memcpy(&jng_joysticks[b].info, &tmpinfo,               sizeof(jng_info_t));
         
         // Aggiorna i joystick a cui puntano i driver
-        jng_joysticks[a].driver->joystick = jng_joysticks + b;
-        jng_joysticks[a].driver->r_inc    = jng_joysticks[b].feedback_inc;
+        jng_joysticks[a].driver->joystick = jng_joysticks + a;
+        jng_joysticks[a].driver->r_inc    = jng_joysticks[a].feedback_inc;
         
-        jng_joysticks[b].driver->joystick = jng_joysticks + a;
-        jng_joysticks[b].driver->r_inc    = jng_joysticks[a].feedback_inc;
+        jng_joysticks[b].driver->joystick = jng_joysticks + b;
+        jng_joysticks[b].driver->r_inc    = jng_joysticks[b].feedback_inc;
+        
+        // JNG_CTRL_INFO_CHANGED
+        jng_joysticks[a].state_ex.control.last_info_inc = jng_joysticks[a].state_inc + 1;
+        jng_joysticks[b].state_ex.control.last_info_inc = jng_joysticks[b].state_inc + 1;
+        
+        // JNG_CTRL_SLOT_CHANGED
+        jng_joysticks[a].feedback_ex.control.slot = a;
+        jng_joysticks[b].feedback_ex.control.slot = b;
         
         // Rigenera eventi client e driver per a e b
         jng_joysticks[a].state_inc++;
         jng_joysticks[a].feedback_inc++;
+        
         jng_joysticks[b].state_inc++;
         jng_joysticks[b].feedback_inc++;
         

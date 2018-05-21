@@ -1,8 +1,13 @@
 module/, jngd, jngctl:
     Aggiungere un collegamento tra modulo kernel e jngd, per aggiungere funzionalità tipo
-        swap joystick
+        swap joystick [OK, preliminare]
         disconnessione soft dei joystick
     il tutto con nuovi eventi CTRL per i driver
 
-È necessario riorganizzare tutto il sistema di input/output:
-    Lettura solo in mod eventi
+module/:
+    Riorganizzare le strutture dati [OK]
+    (client)
+        Lettura aggregata di più joystick (jng_event_ex_t)
+        Scrittura generica (jng_event_ex_t)
+    (driver)
+        In teoria a posto

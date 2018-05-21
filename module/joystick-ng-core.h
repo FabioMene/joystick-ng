@@ -66,23 +66,23 @@ typedef struct {
     // Non NULL se un driver lo sta gestendo (Questa è la connessione col driver)
     struct jng_connection_s* driver;
     
-    jng_state_t    state;
-    jng_feedback_t feedback;
-    jng_info_t     info;
+    jng_info_t        info;
     
+    // Stato input
+    jng_state_ex_t    state_ex;
     // RWLock sullo stato del joystick (client: reader, driver: writer)
-    rwlock_t       state_lock;
-    // Spinlock perché un solo driver gestisce un joystick, ergo un solo reader per volta
-    spinlock_t     feedback_lock;
-    
-    // Code di lettura, per gli eventi. i valori incrementali incrementano ad ogni cambiamento
-    // e non dipendono dal driver/client
+    rwlock_t          state_lock;
+    // Coda e incrementale (per tenere traccia dei cambiamenti)
     wait_queue_head_t state_queue;
     unsigned int      state_inc;
     
+    // Stato output
+    jng_feedback_ex_t feedback_ex;
+    // Spinlock perché un solo driver gestisce un joystick, ergo un solo reader per volta
+    spinlock_t        feedback_lock;
+    // Coda e incrementale
     wait_queue_head_t feedback_queue;
     unsigned int      feedback_inc;
-    
 } jng_joystick_t;
 
 // Dati connessione, valido per client e server
@@ -92,16 +92,22 @@ typedef struct jng_connection_s {
     
     // Roba termporanea (gestione eventi)
     // Queste cache servono per tenere liberi gli spinlock
-    union {
-        jng_state_t     tmpstate;
-        jng_feedback_t  tmpfeedback;
-    };
-    jng_event_t     tmpevent;
+    struct {
+        union {
+            jng_state_ex_t    state_ex;
+            jng_feedback_ex_t feedback_ex;
+        };
+        
+        union {
+            jng_event_t    event; // Per driver
+            jng_event_ex_t event_ex; // Per client
+        };
+    } tmp;
     
     // Queste strutture servono per generare gli eventi (diff)
     union {
-        jng_state_t    state;
-        jng_feedback_t feedback;
+        jng_state_ex_t    state_ex;
+        jng_feedback_ex_t feedback_ex;
     } diff; 
     
     // Modo lettura/scrittura
@@ -118,7 +124,7 @@ typedef struct jng_connection_s {
 } jng_connection_t;
 
 // Scorciatoie tattica, da usare in joystick-ng-{driver,client}-fops.c dove struct file* fp è definito
-#define jng_connection_data    ((jng_connection_t*)fp->private_data)
+#define jng_connection_data ((jng_connection_t*)fp->private_data)
 
 
 // Funzioni (ex macro) per bloccare/sbloccare gli spinlock
@@ -183,15 +189,6 @@ static __always_inline void jng_control_wlock(void){
 
 static __always_inline void jng_control_wunlock(void){
     write_unlock(&jng_control_lock);
-}
-
-
-// Aggiunge un evento sulla coda di lettura
-static inline void jng_add_event(jng_connection_t* conn, unsigned short type, unsigned int what, int val){
-    conn->tmpevent.type  = type;
-    conn->tmpevent.what  = what;
-    conn->tmpevent.value = val;
-    jng_queue_add(&conn->rbuffer, &conn->tmpevent);
 }
 
 #endif

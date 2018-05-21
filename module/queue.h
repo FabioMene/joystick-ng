@@ -28,6 +28,8 @@
 //  -1 in caso di problemi di memoria o di posizione (es pos < 0) e coda piena/vuota
 
 typedef struct {
+    spinlock_t     access_spinlock;
+    
     unsigned char* buffer;
     unsigned int   buflen;
     
