@@ -15,5 +15,7 @@ int main(){
     P(JNGIOCGETMODE);
     P(JNGIOCSETEVMASK);
     P(JNGIOCGETEVMASK);
+    P(JNGIOCAGRADD);
+    P(JNGIOCAGRDEL);
     return 0;
 }

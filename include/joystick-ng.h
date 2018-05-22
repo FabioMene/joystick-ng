@@ -1,7 +1,7 @@
 /*
  * joystick-ng.h
  * 
- * Copyright 2015-2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2015-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -141,8 +141,7 @@ typedef struct {
 // Evento. what contiene UN SOLO BIT (si ottiene da read in mod evento, ovviamente). 
 // Può essere usato sia con read() che con write()
 
-// Evento semplice. Viene usato quando si legge da un solo joystick o
-// in modalità di lettura aggregata
+// Evento semplice.
 // I driver possono usare solo questo tipo di evento
 typedef struct {
     unsigned short type;   // JNG_EV_* 
@@ -152,12 +151,14 @@ typedef struct {
 
 // Evento esteso, solo per client.
 // In lettura num contiene il numero del joystick che ha generato l'evento,
-// in scrittura indica il numero di joystick a cui inviare l'evento
+// in scrittura indica il numero di joystick a cui inviare l'evento (indipendente da JNGIOCSETSLOT)
+// I client possono usare anche eventi normali, in quel caso num viene scartato in lettura e assunto
+// uguale al valore impostato con JNGIOCSETSLOT in scrittura
 typedef struct {
     unsigned short type;
     unsigned int   what;
     int            value;
-    unsigned short num;  // Numero del joystick che ha generato l'evento
+    unsigned short num;  // Numero del joystick
 } jng_event_ex_t;
 
 
@@ -356,15 +357,15 @@ typedef struct {
 
 
 // Per JNGIOCSETMODE
-#define JNG_RMODE_BLOCK 0x00
-#define JNG_RMODE_EVENT 0x01
+#define JNG_RMODE_BLOCK     0x00
+#define JNG_RMODE_EVENT     0x01
+#define JNG_RMODE_AGGREGATE 0x10 // Specificare sempre insieme a JNG_RMODE_EVENT
 
-#define JNG_WMODE_BLOCK 0x00
-#define JNG_WMODE_EVENT 0x02
+#define JNG_WMODE_BLOCK     0x00
+#define JNG_WMODE_EVENT     0x02
 
 #define JNG_MODE_BLOCK (JNG_RMODE_BLOCK | JNG_WMODE_BLOCK)
 #define JNG_MODE_EVENT (JNG_RMODE_EVENT | JNG_WMODE_EVENT)
-
 
 #define JNG_IOCTL_TYPE 'j'
 
@@ -374,6 +375,7 @@ typedef struct {
 // Cambiando slot o cambiando modalità di lettura da normale ad eventi vengono rigenerati
 // e messi in coda di lettura tutti gli eventi, come se lo stato precedente fosse non collegato.
 // La coda può essere svuotata in qualsiasi momento chiamando fsync()
+// Un client che legge in modalità aggregata (vedi sotto) e che scrive eventi estesi può ignorare questa ioctl
 #define JNGIOCSETSLOT _IOW(JNG_IOCTL_TYPE, 0x00, unsigned int)
 
 
@@ -393,12 +395,13 @@ typedef struct {
 // La modalità consiste in UN flag JNG_RMODE_* e UN flag JNG_WMODE_*, ORati, oppure uno dei due flag JNG_MODE_*
 // C e D indicano risp. client e driver e indicano cosa devono leggere/scrivere
 // Mod Lettura Normale (JNG_RMODE_NORMAL e JNG_MODE_NORMAL)
-//     C: jng_state_t
-//     D: jng_feedback_t
+//     C: jng_state_t o jng_state_ex_t
+//     D: jng_feedback_t o jng_feedback_ex_t
 // Mod Scrittura Normale (JNG_WMODE_NORMAL e JNG_MODE_NORMAL)
 //     C: jng_feedback_t
 //     D: jng_state_t
-// Per le modalità ad eventi sia C che D leggono e scrivono jng_event_t
+// Per le modalità ad eventi i client possono leggere e scrivere sia jng_event_t sia jng_event_ex_t
+// mentre i driver leggono e scrivono solo jng_event_t
 // Trovatemi un modulo più flessibile di questo
 // Vedi anche: JNGIOCSETSLOT
 #define JNGIOCSETMODE _IOW(JNG_IOCTL_TYPE, 0x02, unsigned int)
@@ -406,13 +409,29 @@ typedef struct {
 // Ottiene la modalità impostata (CD)
 #define JNGIOCGETMODE _IOR(JNG_IOCTL_TYPE, 0x02, unsigned int)
 
+
 // Imposta gli eventi a cui il client/driver (quindi CD) è interessato, valido ovviamente solo in mod. a eventi e solo per gli eventi ricevuti
-// Di default tutti gli eventi vengono inviati
+// Di default tutti gli eventi meno JNG_EV_SENSORS vengono inviati
 #define JNGIOCSETEVMASK _IOW(JNG_IOCTL_TYPE, 0x03, unsigned int)
 
 // Ottiene gli eventi impostati (CD)
 #define JNGIOCGETEVMASK _IOR(JNG_IOCTL_TYPE, 0x03, unsigned int)
 
+
+// Modalità aggregata
+// Questa modalità permette ai client (e solo ai client) di leggere da una lista di joystick
+// invece che da uno solo. La modalità viene attivata impostando la modalità RMODE_EVENT | RMODE_AGGREGATE
+// In modalità aggregata possono essere effettuate queste ioctl, che manipolano la lista di slot
+// da cui leggere
+// Le altre ioctl non sono influenzate da questa modalità, ad eccezione di
+// JNGIOCSETEVMASK, che ha effetto su tutti i joystick della lista
+
+// Aggiungi uno slot all'elenco (C)
+// Aggiungere lo stesso slot rigenera i suoi eventi
+#define JNGIOCAGRADD _IOW(JNG_IOCTL_TYPE, 0x04, unsigned int)
+
+// Rimuove uno slot dall'elenco (C)
+#define JNGIOCAGRDEL _IOW(JNG_IOCTL_TYPE, 0x05, unsigned int)
 
 
 // Hack per accedere velocemente ai dati del joystick

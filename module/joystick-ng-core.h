@@ -1,7 +1,7 @@
 /*
  * joystick-ng-core.h
  * 
- * Copyright 2015-2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2015-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -54,7 +54,7 @@
 #include <linux/types.h>
 #include <linux/wait.h>
 #include "../include/joystick-ng.h"
-#include "queue.h"
+#include "list.h"
 
 // Per la dipendenza ciclica
 struct jng_connection_s;
@@ -84,6 +84,13 @@ typedef struct {
     wait_queue_head_t feedback_queue;
     unsigned int      feedback_inc;
 } jng_joystick_t;
+
+// Elemento della lista cl_aggregate, usato dai client in mod. aggregata
+typedef struct {
+    jng_joystick_t* js;   // Joystick associato
+    jng_state_ex_t  diff; // Differenze per questo joystick
+    unsigned int    inc;  // Incrementale
+} jng_aggregate_element_t;
 
 // Dati connessione, valido per client e server
 typedef struct jng_connection_s {
@@ -117,10 +124,13 @@ typedef struct jng_connection_s {
     unsigned int    evmask;
     
     // Buffer di eventi di lettura. Gli eventi in scrittura aggiornano la parte corrispondente
-    jng_queue_t     rbuffer;
+    jng_list_t      rbuffer;
     // Valore da confrontare con quello del joystick, il che in teoria non crea race conditions
     // L'incremento di state_inc e feedback_inc avviene invece atomicamente
     unsigned int    r_inc;
+    
+    // Lista dei joystick in modalità aggregata
+    jng_list_t      cl_aggregate;
 } jng_connection_t;
 
 // Scorciatoie tattica, da usare in joystick-ng-{driver,client}-fops.c dove struct file* fp è definito

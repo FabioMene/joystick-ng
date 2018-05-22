@@ -1,7 +1,7 @@
 /*
  * joystick-ng-client-fops.c
  * 
- * Copyright 2015-2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2015-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,6 +28,7 @@
 #include <linux/fs.h>
 #include <linux/poll.h>
 #include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
 #include <linux/gfp.h>
@@ -49,8 +50,10 @@ static int jng_client_open(struct inode* in, struct file* fp){
     jng_connection_data->mode     = JNG_MODE_BLOCK;
     jng_connection_data->evmask   = JNG_EV_CTRL | JNG_EV_KEY | JNG_EV_AXIS; // Di default non riceve gli eventi dei sensori
     
-    jng_queue_init(&jng_connection_data->rbuffer, sizeof(jng_event_ex_t), JNG_MAX_CONN_EV);
+    jng_list_init(&jng_connection_data->rbuffer, sizeof(jng_event_ex_t), JNG_MAX_CONN_EV);
     jng_connection_data->r_inc = 0;
+    
+    jng_list_init(&jng_connection_data->cl_aggregate, sizeof(jng_aggregate_element_t), JNG_TOT);
     
     return 0;
 
@@ -61,19 +64,19 @@ static int jng_client_open(struct inode* in, struct file* fp){
 }
 
 // Controlla se i dati sono cambiati dall'ultima lettura. Se sì, aggiorna
-// il contatore incrementale (conn->r_inc), copia lo stato del joystick in conn->tmpstate
+// il contatore incrementale (inc), copia lo stato del joystick in state
 // e ritorna 0 (atomicità con spinlock di lettura)
 // Se i data non sono cambiati ritorna -1
-static int jng_update_client_incremental(jng_connection_t* conn){
+static int jng_update_client_incremental(jng_joystick_t* js, jng_state_ex_t* state, unsigned int* inc){
     int return_val = -1;
     
-    jng_state_rlock(conn->joystick);
-    if(conn->r_inc != conn->joystick->state_inc){
-        memcpy(&conn->tmp.state_ex, &conn->joystick->state_ex, sizeof(jng_state_ex_t));
-        return_val = 0;
-        conn->r_inc = conn->joystick->state_inc;
-    }
-    jng_state_runlock(conn->joystick);
+    jng_state_rlock(js);
+        if(*inc != js->state_inc){
+            memcpy(state, &js->state_ex, sizeof(jng_state_ex_t));
+            return_val = 0;
+            *inc = js->state_inc;
+        }
+    jng_state_runlock(js);
     
     return return_val;
 }
@@ -83,16 +86,16 @@ static inline void jng_add_client_event(jng_connection_t* conn, unsigned short t
     conn->tmp.event_ex.type  = type;
     conn->tmp.event_ex.what  = what;
     conn->tmp.event_ex.value = val;
-    jng_queue_add(&conn->rbuffer, &conn->tmp.event_ex);
+    jng_list_append(&conn->rbuffer, &conn->tmp.event_ex);
 }
 
-// Trova le differenze tra conn->tmp.state_ex e conn->diff.state_ex e genera gli eventi
+// Trova le differenze tra conn->tmp.state_ex e diff e genera gli eventi
 // rispettando la event mask
 // Questa funzione richiede che conn->tmp.event_ex.num sia impostato
 
-static void jng_gen_client_events(jng_connection_t* conn){
+static void jng_gen_client_events(jng_connection_t* conn, jng_state_ex_t* diff){
     // Questa macro evita 5000000 milioni di if
-    #define jng_diff_cmp(_prop, _type, _what) if(conn->diff.state_ex._prop != conn->tmp.state_ex._prop) jng_add_client_event(conn, _type, _what, conn->tmp.state_ex._prop)
+    #define jng_diff_cmp(_prop, _type, _what) if(diff->_prop != conn->tmp.state_ex._prop) jng_add_client_event(conn, _type, _what, conn->tmp.state_ex._prop)
     
     // Eventi di controllo
     if(conn->evmask & JNG_EV_CTRL){
@@ -153,32 +156,149 @@ static void jng_gen_client_events(jng_connection_t* conn){
     #undef jng_diff_cmp
     
     // Aggiornamento diff
-    memcpy(&conn->diff.state_ex, &conn->tmp.state_ex, sizeof(jng_state_ex_t));
+    memcpy(diff, &conn->tmp.state_ex, sizeof(jng_state_ex_t));
+}
+
+static void jng_gen_aggregate_events_cb(void* el, void* arg){
+    jng_connection_t*        conn = (jng_connection_t*)arg;
+    jng_aggregate_element_t* ael  = (jng_aggregate_element_t*)el;
+    
+    if(jng_update_client_incremental(ael->js, &conn->tmp.state_ex, &ael->inc) == 0){
+        // Genera eventi
+        conn->tmp.event_ex.num = ael->js->num;
+        jng_gen_client_events(conn, &ael->diff);
+    }
+}
+
+// Controlla la modalità di lettura e genera gli eventi per questo client
+static int jng_update_client_events(jng_connection_t* conn){
+    // Dividi tra modalità aggregata e non
+    if(conn->mode & JNG_RMODE_AGGREGATE){
+        // Itera con callback la lista cl_aggregate
+        jng_list_iter(&conn->cl_aggregate, jng_gen_aggregate_events_cb, conn);
+    } else {
+        // Sanity check
+        if(conn->joystick == NULL) return -1;
+        
+        // Controlla se lo stato è cambiato dall'ultimo controllo, e se sì,
+        // genera eventuali nuovi eventi
+        if(jng_update_client_incremental(conn->joystick, &conn->tmp.state_ex, &conn->r_inc) == 0){
+            // Genera eventi
+            conn->tmp.event_ex.num = conn->joystick->num;
+            jng_gen_client_events(conn, &conn->diff.state_ex);
+        }
+    }
+    
+    return 0;
+}
+
+typedef struct {
+    jng_joystick_t* joysticks[JNG_TOT];
+    unsigned int    incs[JNG_TOT];
+    int num;
+} jng_iter_wait_argument_t;
+
+static void jng_fill_wait_argument_cb(void* el, void* arg){
+    jng_aggregate_element_t*  ael = (jng_aggregate_element_t*)el;
+    jng_iter_wait_argument_t* wa  = (jng_iter_wait_argument_t*)arg;
+    
+    
+    wa->joysticks[wa->num] = ael->js;
+    wa->incs[wa->num]      = ael->inc;
+    wa->num++;
+}
+
+// wake_up_interruptible, ma per code multiple (mod. aggregata)
+static int jng_wait_mult_event_interruptible(jng_connection_t* conn){
+    jng_iter_wait_argument_t was = {
+        .num = 0
+    };
+    int i, ret, break_while;
+    wait_queue_entry_t* queues;
+    
+    jng_list_iter(&conn->cl_aggregate, jng_fill_wait_argument_cb, &was);
+    
+    queues = kmalloc(sizeof(wait_queue_entry_t) * was.num, GFP_KERNEL);
+    if(!queues) return -ENOMEM;
+    
+    for(i = 0;i < was.num;i++){
+        // Inizializza l'elemento
+        init_wait(queues + i);
+        queues[i].func = default_wake_function;
+        
+        // Aggiungi alla lista
+        add_wait_queue(&was.joysticks[i]->state_queue, queues + i);
+    }
+    
+    ret = 0;
+    
+    // Parte critica (penso)
+    while(1){
+        //
+        set_current_state(TASK_INTERRUPTIBLE);
+        
+        // Controlla tutte le condizioni di uscita
+        break_while = 0;
+        for(i = 0;i < was.num;i++){
+            if(was.incs[i] != was.joysticks[i]->state_inc){
+                break_while = 1;
+                break;
+            }
+        }
+        
+        if(break_while) break;
+        
+        // Niente di nuovo, schedula il processo
+        schedule();
+        
+        // Controlla segnali in attesa
+        if(signal_pending(current)){
+            ret = -ERESTARTSYS;
+            break;
+        }
+    }
+    
+    // Rimuovi gli elementi dalle code
+    for(i = 0;i < was.num;i++){
+        remove_wait_queue(&was.joysticks[i]->state_queue, queues + i);
+    }
+    
+    set_current_state(TASK_RUNNING);
+    // Fine parte critica
+    
+    kfree(queues);
+    
+    return ret;
 }
 
 static ssize_t jng_client_read(struct file* fp, char __user* buffer, size_t len, loff_t* offp){
-    if(jng_connection_data->joystick == NULL) return -EINVAL;
     if(jng_connection_data->mode & JNG_RMODE_EVENT){
         // Modalità eventi
-        
         if(len < sizeof(jng_event_t)) return -EINVAL;
         
         if(len >= sizeof(jng_event_ex_t)) len = sizeof(jng_event_ex_t);
         else                              len = sizeof(jng_event_t);
         
       jng_cl_rd_read_again:
-        // Controlla se lo stato è cambiato dall'ultimo controllo, e se sì,
-        // genera eventuali nuovi eventi
-        if(jng_update_client_incremental(jng_connection_data) == 0){
-            jng_connection_data->tmp.event_ex.num = jng_connection_data->joystick->num;
-            jng_gen_client_events(jng_connection_data);
-        }
+        
+        if(jng_update_client_events(jng_connection_data)) return -EINVAL;
         
         // È possibile che non ci sia nessun evento
-        if(jng_queue_pop(&jng_connection_data->rbuffer, &jng_connection_data->tmp.event_ex)){
+        if(jng_list_pop(&jng_connection_data->rbuffer, &jng_connection_data->tmp.event_ex)){
+            int ret = 0;
+            
             if(fp->f_flags & O_NONBLOCK) return -EAGAIN;
             // Dobbiamo aspettare
-            if(wait_event_interruptible(jng_connection_data->joystick->state_queue, jng_connection_data->r_inc != jng_connection_data->joystick->state_inc)) return -ERESTARTSYS;
+            if(jng_connection_data->mode & JNG_RMODE_AGGREGATE)
+                ret = jng_wait_mult_event_interruptible(jng_connection_data);
+            else
+                ret = wait_event_interruptible(
+                    jng_connection_data->joystick->state_queue,
+                    jng_connection_data->r_inc != jng_connection_data->joystick->state_inc
+                );
+            
+            if(ret) return ret;
+            
             // Controlliamo di nuovo i dati
             goto jng_cl_rd_read_again;
         }
@@ -188,6 +308,8 @@ static ssize_t jng_client_read(struct file* fp, char __user* buffer, size_t len,
     }
     
     // Mod normale
+    if(jng_connection_data->joystick == NULL) return -EINVAL;
+    
     if(len < sizeof(jng_state_t)) return -EINVAL;
     
     if(len >= sizeof(jng_state_ex_t)) len = sizeof(jng_state_ex_t);
@@ -266,28 +388,43 @@ static ssize_t jng_client_write(struct file* fp, const char __user* buffer, size
     return sizeof(jng_feedback_t);
 }
 
+typedef struct {
+    struct file* fp;
+    poll_table*  pt;
+} jng_iter_poll_argument_t;
+
+static void jng_add_to_poll_table_cb(void* el, void* arg){
+    jng_iter_poll_argument_t* pa = (jng_iter_poll_argument_t*)arg;
+    
+    poll_wait(pa->fp, &((jng_aggregate_element_t*)el)->js->state_queue, pa->pt);
+}
+
 static unsigned int jng_client_poll(struct file* fp, poll_table* pt){
     unsigned int mask;
-    
-    if(jng_connection_data->joystick == NULL) return -EINVAL;
     
     // In scrittura non blocca mai
     mask = POLLOUT | POLLWRNORM;
     
-    // Aggiungi comunque la coda eventi
-    // TODO: Capire cosa intendevo con questo commento
-    poll_wait(fp, &jng_connection_data->joystick->state_queue, pt);
+    // A seconda della modalità di lettura aggiungi la coda 
+    if(jng_connection_data->mode & JNG_RMODE_AGGREGATE){
+        jng_iter_poll_argument_t pa = {
+            .fp = fp,
+            .pt = pt
+        };
+        
+        jng_list_iter(&jng_connection_data->cl_aggregate, jng_add_to_poll_table_cb, &pa);
+    } else {
+        poll_wait(fp, &jng_connection_data->joystick->state_queue, pt);
+    }
     
     // Controlla la mod di lettura
     if(jng_connection_data->mode & JNG_RMODE_EVENT){
         // In modalità eventi fa gli stessi controlli di read()
         // e ritorna POLLIN solo se c'è almeno un evento
         
-        if(jng_update_client_incremental(jng_connection_data) == 0){
-            jng_gen_client_events(jng_connection_data);
-        }
+        jng_update_client_events(jng_connection_data);
         
-        if(jng_queue_len(&jng_connection_data->rbuffer) != 0){
+        if(jng_list_len(&jng_connection_data->rbuffer) != 0){
             mask |= POLLIN | POLLRDNORM;
         }
     } else {
@@ -303,7 +440,7 @@ static int jng_client_fsync(struct file* fp, loff_t start, loff_t end, int datas
     // Se si è in lettura normale questo non avrà effetto
     
     // Cancella la coda degli eventi
-    jng_queue_delall(&jng_connection_data->rbuffer);
+    jng_list_delall(&jng_connection_data->rbuffer);
     
     // Aggiorna le differenze, solo se lo slot è stato impostato
     if(jng_connection_data->joystick != NULL){
@@ -318,12 +455,17 @@ static int jng_client_fsync(struct file* fp, loff_t start, loff_t end, int datas
 }
 
 static int jng_del_unwanted_events_cb(void* el, void* arg){
-    return !(*((unsigned int*)arg) & ((jng_event_ex_t*)el)->type);
+    return !(((unsigned long)arg) & ((jng_event_ex_t*)el)->type);
+}
+
+static int jng_del_unwanted_aggregate_cb(void* el, void* arg){
+    return ((jng_aggregate_element_t*)el)->js->num == (unsigned long)arg;
 }
 
 static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long arg){
     int rc;
     jng_info_t tmpinfo;
+    jng_aggregate_element_t tmpagr;
     
     // Evita di spammare messaggi di log per la selezione joystick, dato che tecnicamente
     // si possono leggere i dati di tutti e 32 i joystick da un solo fd
@@ -360,15 +502,20 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
         
         
         case JNGIOCSETMODE:
-            if(jng_connection_data->joystick == NULL) return -EINVAL;
+            // La modalità aggregata ignora jng_connection_data->joystick
+        
+            if((arg & JNG_RMODE_AGGREGATE) == 0 && jng_connection_data->joystick == NULL) return -EINVAL;
             jng_connection_data->mode = arg;
             
-            if(!(arg & JNG_RMODE_EVENT)){
+            if((arg & JNG_RMODE_EVENT) == 0){
                 // Cancella la coda degli eventi quando si va in mod lettura normale
-                jng_queue_delall(&jng_connection_data->rbuffer);
-            } else {
-                // Azzera le differenze quando si entra in mod lettura eventi
+                jng_list_delall(&jng_connection_data->rbuffer);
+            } else if((arg & JNG_RMODE_AGGREGATE) == 0){
+                // Azzera le differenze quando si entra in mod lettura eventi non aggregati
                 memset(&jng_connection_data->diff.state_ex, 0, sizeof(jng_state_ex_t));
+                
+                // Cancella le impostazioni di lettura aggregata
+                jng_list_delall(&jng_connection_data->cl_aggregate);
             }
             return 0;
         
@@ -379,11 +526,39 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
         case JNGIOCSETEVMASK:
             jng_connection_data->evmask = arg;
             // Cancella eventuali eventi a cui il client non è più interessato
-            jng_queue_delcb(&jng_connection_data->rbuffer, jng_del_unwanted_events_cb, &arg);
+            jng_list_delcb(&jng_connection_data->rbuffer, jng_del_unwanted_events_cb, (void*)arg);
             return 0;
         
         case JNGIOCGETEVMASK:
             return copy_to_user((unsigned int*)arg, &jng_connection_data->evmask, sizeof(unsigned int)) ? -EFAULT : 0;
+        
+        case JNGIOCAGRADD:
+            if((jng_connection_data->mode & JNG_RMODE_AGGREGATE) == 0) return -EINVAL;
+            
+            if(arg < 0 || arg > JNG_TOT - 1) return -EINVAL;
+            
+            // Rimuovi l'eventuale copia corrente
+            jng_list_delcb(&jng_connection_data->cl_aggregate, jng_del_unwanted_aggregate_cb, (void*)arg);
+            
+            // Crea il nuovo elemento della lista
+            tmpagr.js = jng_joysticks + arg;
+            
+            memset(&tmpagr.diff, 0, sizeof(jng_state_ex_t));
+            
+            tmpagr.inc = 0;
+            
+            // Aggiungi l'elemento
+            jng_list_append(&jng_connection_data->cl_aggregate, &tmpagr);
+            
+            return 0;
+        
+        case JNGIOCAGRDEL:
+            if((jng_connection_data->mode & JNG_RMODE_AGGREGATE) == 0) return -EINVAL;
+            
+            // Cancella dalla lista, se presente
+            jng_list_delcb(&jng_connection_data->cl_aggregate, jng_del_unwanted_aggregate_cb, (void*)arg);
+            
+            return 0;
     }
 
     return -ENOTTY;

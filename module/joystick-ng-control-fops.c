@@ -41,8 +41,8 @@ static int jng_control_open(struct inode* in, struct file* fp){
     int b = 1;
     
     // Per segnalare le code dopo aver rilasciato gli spinlock
-    int wake_a_driver = 0;
-    int wake_b_driver = 0;
+    int wake_driver_a = 0;
+    int wake_driver_b = 0;
     
     // Swap 0 e 1
     
@@ -102,8 +102,8 @@ static int jng_control_open(struct inode* in, struct file* fp){
         
         
         // Risveglia solo l'unico driver che può essere in attesa
-        wake_a_driver = n_conn == a;
-        wake_b_driver = n_conn == b;
+        wake_driver_a = n_conn == a;
+        wake_driver_b = n_conn == b;
     } else {
         // a e b non NULL
         jng_connection_t* tmp;
@@ -141,8 +141,8 @@ static int jng_control_open(struct inode* in, struct file* fp){
         jng_joysticks[b].state_inc++;
         jng_joysticks[b].feedback_inc++;
         
-        wake_a_driver = 1;
-        wake_b_driver = 1;
+        wake_driver_a = 1;
+        wake_driver_b = 1;
     }
     
     // Rilascia gli spinlock in ordine inverso
@@ -157,11 +157,11 @@ static int jng_control_open(struct inode* in, struct file* fp){
     jng_control_wunlock();
     
     // Risveglia i driver solo se necessario
-    if(wake_a_driver){
+    if(wake_driver_a){
         wake_up_interruptible(&jng_joysticks[a].feedback_queue);
     }
     
-    if(wake_b_driver){
+    if(wake_driver_b){
         wake_up_interruptible(&jng_joysticks[b].feedback_queue);
     }
     

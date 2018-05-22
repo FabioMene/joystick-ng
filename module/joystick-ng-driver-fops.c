@@ -1,7 +1,7 @@
 /*
  * joystick-ng-driver-fops.c
  * 
- * Copyright 2015-2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2015-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -73,7 +73,7 @@ static int jng_driver_open(struct inode* in, struct file* fp){
     jng_connection_data->evmask   = JNG_EV_CTRL | JNG_EV_FB_FORCE | JNG_EV_FB_LED;
     
     // Coda eventi
-    jng_queue_init(&jng_connection_data->rbuffer, sizeof(jng_event_t), JNG_MAX_CONN_EV);
+    jng_list_init(&jng_connection_data->rbuffer, sizeof(jng_event_t), JNG_MAX_CONN_EV);
     jng_connection_data->r_inc = 0;
     
     // JNG_CTRL_CONNECTION
@@ -115,7 +115,7 @@ static void jng_add_driver_event(jng_connection_t* conn, unsigned short type, un
     conn->tmp.event.type  = type;
     conn->tmp.event.what  = what;
     conn->tmp.event.value = val;
-    jng_queue_add(&conn->rbuffer, &conn->tmp.event);
+    jng_list_append(&conn->rbuffer, &conn->tmp.event);
 }
 
 static void jng_gen_driver_events(jng_connection_t* conn){
@@ -167,7 +167,7 @@ static ssize_t jng_driver_read(struct file* fp, char __user* buffer, size_t len,
         }
         
         // È possibile che non ci sia nessun evento, in tal caso controlla cosa fare
-        if(jng_queue_pop(&jng_connection_data->rbuffer, &jng_connection_data->tmp.event)){
+        if(jng_list_pop(&jng_connection_data->rbuffer, &jng_connection_data->tmp.event)){
             if(fp->f_flags & O_NONBLOCK) return -EAGAIN;
             // Dobbiamo aspettare
             if(wait_event_interruptible(js->feedback_queue, jng_connection_data->r_inc != js->feedback_inc)) return -ERESTARTSYS;
@@ -284,7 +284,7 @@ static unsigned int jng_driver_poll(struct file* fp, poll_table* pt){
             jng_gen_driver_events(jng_connection_data);
         }
         
-        if(jng_queue_len(&jng_connection_data->rbuffer) != 0){
+        if(jng_list_len(&jng_connection_data->rbuffer) != 0){
             mask |= POLLIN | POLLRDNORM;
         }
     } else {
@@ -302,7 +302,7 @@ static int jng_driver_fsync(struct file* fp, loff_t start, loff_t end, int datas
     jng_control_copy_joystick(js);
     
     // Cancella la coda degli eventi
-    jng_queue_delall(&jng_connection_data->rbuffer);
+    jng_list_delall(&jng_connection_data->rbuffer);
     
     // Aggiorna le differenze. Non è necessario controllare js, dato che viene assegnato dal kernel in open()
     jng_feedback_lock(js);
@@ -350,10 +350,12 @@ static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
             return rc ?-EFAULT : 0;
         
         case JNGIOCSETMODE:
+            if(arg & JNG_RMODE_AGGREGATE) return -EINVAL; // Solo client
+            
             jng_connection_data->mode = arg;
             if(!(arg & JNG_RMODE_EVENT)){
                 // Quando si esce dalla lettura ad eventi cancella la coda
-                jng_queue_delall(&jng_connection_data->rbuffer);
+                jng_list_delall(&jng_connection_data->rbuffer);
             } else {
                 // Se si imposta la lettura ad eventi si azzera la struttura delle differenze, così gli eventi vengono ricreati
                 memset(&jng_connection_data->diff.feedback_ex, 0, sizeof(jng_feedback_ex_t));
@@ -367,12 +369,18 @@ static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
         case JNGIOCSETEVMASK:
             jng_connection_data->evmask = arg;
             // Cancella eventuali eventi a cui il driver non è più interessato
-            jng_queue_delcb(&jng_connection_data->rbuffer, jng_del_unwanted_events_cb, &arg);
+            jng_list_delcb(&jng_connection_data->rbuffer, jng_del_unwanted_events_cb, &arg);
             
             return 0;
         
         case JNGIOCGETEVMASK:
             return copy_to_user((unsigned int*)arg, &jng_connection_data->evmask, sizeof(unsigned int)) ? -EFAULT : 0;
+        
+        case JNGIOCAGRADD: // Solo client
+            return -EINVAL;
+        
+        case JNGIOCAGRDEL: // Solo client
+            return -EINVAL;
     }
     return -ENOTTY;
 }

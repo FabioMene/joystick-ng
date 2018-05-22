@@ -7,7 +7,10 @@ module/, jngd, jngctl:
 module/:
     Riorganizzare le strutture dati [OK]
     (client)
-        Lettura aggregata di più joystick (jng_event_ex_t)
-        Scrittura generica (jng_event_ex_t)
+        Lettura aggregata di più joystick (jng_event_ex_t) [OK, spero non ci siano troppi bug]
+        Scrittura generica (jng_event_ex_t) [OK]
     (driver)
         In teoria a posto
+
+TUTTO:
+    Definire in modo sano le strutture dati (allineamento, dimensioni dati costanti)
