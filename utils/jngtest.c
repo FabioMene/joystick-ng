@@ -130,6 +130,8 @@ void usage(char* fmt, ...){
     printf("Uso: jngtest <n> [opzioni]\n"
            "Interfaccia di test per joystick-ng\n"
            "Parametro <n>: slot da cui leggere (da 1 a 32)\n"
+           "               Se si specifica g legge da tutti i joystick\n"
+           "               (mod. aggregata) e sono validi solo i flag -kascA\n"
            "Se non vengono specificate opzioni viene sottointeso -i\n"
            "Le opzioni devono sempre essere specificate dopo <n>\n"
            "Opzioni:\n"
@@ -160,29 +162,45 @@ void usage(char* fmt, ...){
 
 int fd;
 
+int aggregate = 0;
+
 int read_info = 0;
 
 unsigned int evmask = 0;
 
-jng_event_t event;
+jng_event_ex_t event;
 
 int main(int argc, char* argv[]){
     if(argc < 2) usage("Argomento <n> obbligatorio");
     
-    int slot = atoi(argv[1]) - 1;
-    if(slot < 0 || slot > 32) usage("<n> deve essere compreso tra 1 e 32");
+    int slot;
+    
+    if(strcmp(argv[1], "g") == 0){
+        aggregate = 1;
+    } else {
+        slot = atoi(argv[1]) - 1;
+        if(slot < 0 || slot > 32) usage("<n> deve essere compreso tra 1 e 32, oppure deve essere 'g'");
+    }
     
     fd = open("/dev/jng/device", O_RDWR);
     if(fd < 0) {
         printf("Errore nell'apertura di /dev/jng/device\n");
         return 1;
     }
-    ioctl(fd, JNGIOCSETSLOT, slot);
-    ioctl(fd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_EVENT);
+    if(!aggregate){
+        ioctl(fd, JNGIOCSETSLOT, slot);
+        ioctl(fd, JNGIOCSETMODE, JNG_MODE_EVENT);
+    } else {
+        ioctl(fd, JNGIOCSETMODE, JNG_MODE_EVENT | JNG_RMODE_AGGREGATE);
+        
+        int i;
+        for(i = 0;i < 32;i++) ioctl(fd, JNGIOCAGRADD, i);
+    }
     
     char option;
     if(argc > 2) while((option = getopt(argc - 1, argv + 1, "ikascAeM:L:Rh")) > 0) switch(option){
         case 'i':
+            if(aggregate) usage("Opzione non permessa in mod. aggregata");
             read_info = 1;
             break;
         case 'k':
@@ -201,6 +219,7 @@ int main(int argc, char* argv[]){
             evmask |= JNG_EV_KEY | JNG_EV_AXIS | JNG_EV_SENSOR | JNG_EV_CTRL;
             break;
         case 'M': {
+            if(aggregate) usage("Opzione non permessa in mod. aggregata");
             char* div = strchr(optarg, '=');
             if(!div) usage("L'opzione -M richiede il nome del motore, un uguale e il valore numerico");
             *div = 0;
@@ -216,6 +235,7 @@ int main(int argc, char* argv[]){
             write(fd, &event, sizeof(jng_event_t));
         }; break;
         case 'L': {
+            if(aggregate) usage("Opzione non permessa in mod. aggregata");
             char* div = strchr(optarg, '=');
             if(!div) usage("L'opzione -L richiede il numero del led, un uguale e il valore numerico");
             *div = 0;
@@ -229,6 +249,7 @@ int main(int argc, char* argv[]){
             write(fd, &event, sizeof(jng_event_t));
         }; break;
         case 'R': {
+            if(aggregate) usage("Opzione non permessa in mod. aggregata");
             jng_feedback_t fb;
             ioctl(fd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_BLOCK);
             memset(&fb, 0, sizeof(jng_feedback_t));
@@ -240,7 +261,7 @@ int main(int argc, char* argv[]){
         default:
             usage("Opzione '%c' non riconosciuta", option);
     }
-    else read_info = 1;
+    else read_info = !aggregate;
     
     if(read_info){
         jng_info_t info;
@@ -298,7 +319,12 @@ int main(int argc, char* argv[]){
     else ioctl(fd, JNGIOCSETEVMASK, evmask);
     
     while(1){
-        read(fd, &event, sizeof(jng_event_t));
+        read(fd, &event, sizeof(jng_event_ex_t));
+        
+        if(aggregate){
+            printf("% 2d: ", event.num);
+        }
+        
         switch(event.type){
             case JNG_EV_CTRL:
                 printf("CTRL %16s %d\n", table_lookup_name(control_table, event.what), event.value);
