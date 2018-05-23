@@ -1,7 +1,7 @@
 /*
  * main.c
  * 
- * Copyright 2016-2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2016-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -67,14 +67,15 @@ int client_loop(int ctrl, int intr);
 void* sender_thread_loop(void* arg);
 
 jng_info_t jng_info = {
-    .name      = "Sony DualShock3 (Bluetooth)",
-    .keys      = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_L3 | JNG_KEY_R3 | JNG_KEY_DIRECTIONAL | JNG_KEY_START | JNG_KEY_SELECT | JNG_KEY_OPTIONS1,
-    .axis      = JNG_AXIS_LX | JNG_AXIS_LY | JNG_AXIS_RX | JNG_AXIS_RY,
-    .sensors   = JNG_SEN_ACCEL_X | JNG_SEN_ACCEL_Y | JNG_SEN_ACCEL_Z | JNG_SEN_GYRO_X,
-    .fb_force  = JNG_FB_FORCE_BIGMOTOR | JNG_FB_FORCE_SMALLMOTOR,
-    .fb_led    = JNG_FB_LED_1 | JNG_FB_LED_2 | JNG_FB_LED_3 | JNG_FB_LED_4,
-    .flags     = JNG_FLAG_KEY_PRESSURE,
-    .keyp      = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_DIRECTIONAL
+    .name       = "Sony DualShock3 (Bluetooth)",
+    .on_battery = 1,
+    .keys       = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_L3 | JNG_KEY_R3 | JNG_KEY_DIRECTIONAL | JNG_KEY_START | JNG_KEY_SELECT | JNG_KEY_OPTIONS1,
+    .axis       = JNG_AXIS_LX | JNG_AXIS_LY | JNG_AXIS_RX | JNG_AXIS_RY,
+    .sensors    = JNG_SEN_ACCEL_X | JNG_SEN_ACCEL_Y | JNG_SEN_ACCEL_Z | JNG_SEN_GYRO_X,
+    .fb_force   = JNG_FB_FORCE_BIGMOTOR | JNG_FB_FORCE_SMALLMOTOR,
+    .fb_led     = JNG_FB_LED_1 | JNG_FB_LED_2 | JNG_FB_LED_3 | JNG_FB_LED_4,
+    .flags      = JNG_FLAG_KEY_PRESSURE,
+    .keyp       = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_DIRECTIONAL
 };
 
 typedef struct {
@@ -82,8 +83,11 @@ typedef struct {
     int ctrlfd;
     
     int blink; // Dalle opzioni
+    int set_led_on_slot_change; // Dalle opzioni
     
     unsigned char blevel;
+    
+    int soft_disconnect; // Settato a 1 se siamo stati soft-disconnessi
 } sender_thread_arg_t;
 
 void server_sigterm_handler(int sig){
@@ -273,14 +277,24 @@ int client_loop(int ctrl, int intr){
     
     memset(&state, 0, sizeof(jng_state_t));
     
+    // Argomento del sender thread
+    sender_thread_arg_t arg = {
+        .ctrlfd = ctrl,
+        
+        .blevel = 255,
+        .set_led_on_slot_change = 0,
+        
+        .soft_disconnect = 0
+    };
+    
     int jngfd = open("/dev/jng/driver", O_RDWR | O_NONBLOCK);
     if(jngfd < 0) return 1;
     
     // SO. So che le ioctl non falliscono, alias faccio quello che voglio
     ioctl(jngfd, JNGIOCSETINFO, &jng_info);
     
-    ioctl(jngfd, JNGIOCSETMODE,   JNG_WMODE_NORMAL | JNG_RMODE_EVENT);
-    ioctl(jngfd, JNGIOCSETEVMASK, JNG_EV_FB_FORCE | JNG_EV_FB_LED);
+    ioctl(jngfd, JNGIOCSETMODE,   JNG_WMODE_BLOCK | JNG_RMODE_EVENT);
+    ioctl(jngfd, JNGIOCSETEVMASK, JNG_EV_CTRL | JNG_EV_FB_FORCE | JNG_EV_FB_LED);
     
     int res;
     jngd_drvoption_get("set_leds", JNGD_DRVOPT_TYPE_INT, &res);
@@ -303,6 +317,8 @@ int client_loop(int ctrl, int intr){
             l2 = strres[2] != '0';
             l1 = strres[3] != '0';
         } else { // In base allo slot
+            arg.set_led_on_slot_change = 1;
+            
             slot += 1;
             if(slot == 1 || slot == 5 || slot == 8 || slot >= 10) l1 = 1;
             if(slot == 2 || slot == 6 || slot >= 9) l2 = 1;
@@ -334,12 +350,7 @@ int client_loop(int ctrl, int intr){
     
     // Imposta il thread che si occupa di gestire l'output
     pthread_t sender_thread;
-    sender_thread_arg_t arg = {
-        .jngfd  = jngfd,
-        .ctrlfd = ctrl,
-        
-        .blevel = 255
-    };
+    arg.jngfd = jngfd;
     
     // Legge le impostazioni
     int timeout_ds, ps_shutdown_ds;
@@ -450,7 +461,13 @@ int client_loop(int ctrl, int intr){
                 close_cause  = "inattività";
             }
         }
-            
+        
+        // Controllo disconnessione soft
+        if(arg.soft_disconnect){
+            should_close = 1;
+            close_cause  = "Disconnessione software";
+        }
+        
         if(should_close){
             break;
         }
@@ -539,6 +556,23 @@ void* sender_thread_loop(void* varg){
         
         changed = 1;
         switch(ev.type){
+            case JNG_EV_CTRL:
+                if(ev.what == JNG_CTRL_SLOT_CHANGED && arg->set_led_on_slot_change){
+                    int slot = ev.value;
+                    
+                    ds3_control_packet[11] = 0;
+                    
+                    if(slot == 0 || slot == 4 || slot == 7 || slot >= 9) ds3_control_packet[11] |= 0x02;
+                    if(slot == 1 || slot == 5 || slot >= 8) ds3_control_packet[11] |= 0x04;
+                    if(slot == 2 || slot >= 6) ds3_control_packet[11] |= 0x08;
+                    if(slot >= 3) ds3_control_packet[11] |= 0x10;
+                    
+                    ioctl(arg->jngfd, JNGIOCDROPEVT, JNG_EV_FB_LED);
+                } else if(ev.what == JNG_CTRL_SOFT_DISCONNECT){
+                    arg->soft_disconnect = 1;
+                } else changed = 0;
+                break;
+            
             case JNG_EV_FB_FORCE:
                 switch(ev.what){
                     case JNG_FB_FORCE_SMALLMOTOR:

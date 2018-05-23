@@ -1,7 +1,7 @@
 /*
  * main.c
  * 
- * Copyright 2016-2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,14 +40,15 @@
 #define POLL_TIME_USEC 5000 // 5ms
 
 jng_info_t jng_info = {
-    .name      = "Microsoft XBox 360 USB Controller",
-    .keys      = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_L3 | JNG_KEY_R3 | JNG_KEY_DIRECTIONAL | JNG_KEY_START | JNG_KEY_SELECT | JNG_KEY_OPTIONS1,
-    .axis      = JNG_AXIS_LX | JNG_AXIS_LY | JNG_AXIS_RX | JNG_AXIS_RY,
-    .sensors   = 0,
-    .fb_force  = JNG_FB_FORCE_BIGMOTOR | JNG_FB_FORCE_SMALLMOTOR,
-    .fb_led    = JNG_FB_LED_1 | JNG_FB_LED_2 | JNG_FB_LED_3 | JNG_FB_LED_4,
-    .flags     = JNG_FLAG_KEY_PRESSURE,
-    .keyp      = JNG_KEY_L2 | JNG_KEY_R2
+    .name       = "Microsoft XBox 360 USB Controller",
+    .on_battery = 0,
+    .keys       = JNG_KEY_ABXY | JNG_KEY_L1 | JNG_KEY_R1 | JNG_KEY_L2 | JNG_KEY_R2 | JNG_KEY_L3 | JNG_KEY_R3 | JNG_KEY_DIRECTIONAL | JNG_KEY_START | JNG_KEY_SELECT | JNG_KEY_OPTIONS1,
+    .axis       = JNG_AXIS_LX | JNG_AXIS_LY | JNG_AXIS_RX | JNG_AXIS_RY,
+    .sensors    = 0,
+    .fb_force   = JNG_FB_FORCE_BIGMOTOR | JNG_FB_FORCE_SMALLMOTOR,
+    .fb_led     = JNG_FB_LED_1 | JNG_FB_LED_2 | JNG_FB_LED_3 | JNG_FB_LED_4,
+    .flags      = JNG_FLAG_KEY_PRESSURE,
+    .keyp       = JNG_KEY_L2 | JNG_KEY_R2
 };
 
 jng_state_t state;
@@ -106,6 +107,8 @@ void x360_send_ff_report(){
         printw("Invio dati usb: %d", ur);
     }
 }
+
+int is_soft_disconnected = 0;
 
 int axis_deadzone;
 
@@ -172,7 +175,9 @@ int main(int argc, char* argv[]){
     
     ioctl(jngfd, JNGIOCSETINFO, &jng_info);
     
-    ioctl(jngfd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_NORMAL);
+    ioctl(jngfd, JNGIOCSETMODE, JNG_RMODE_EVENT | JNG_WMODE_BLOCK);
+    
+    int set_led_on_slot_change = 0;
     
     int res;
     jngd_drvoption_get("set_leds", JNGD_DRVOPT_TYPE_INT, &res);
@@ -205,6 +210,8 @@ int main(int argc, char* argv[]){
                 led_status = 1;
             }
         } else { // In base allo slot
+            set_led_on_slot_change = 1;
+            
             if(slot >= 0 && slot <= 3){
                 led_status = slot + 2; // Blink then on
                 led_status_mod = 0;
@@ -268,10 +275,36 @@ int main(int argc, char* argv[]){
             state.axis.RY = get_threshold(-report.RY - 1);
             
             write(jngfd, &state, sizeof(jng_state_t));
+            
+            if(is_soft_disconnected && (report.keys2 & 0x04)){
+                ioctl(jngfd, JNGIOCSETINFO, &jng_info);
+                
+                is_soft_disconnected = 0;
+            }
         }
         
         jng_event_t evt;
         if(read(jngfd, &evt, sizeof(jng_event_t)) > 0) switch(evt.type){
+            case JNG_EV_CTRL:
+                if(evt.type == JNG_CTRL_SLOT_CHANGED && set_led_on_slot_change){
+                    if(evt.value >= 0 && evt.value <= 3){
+                        x360_led_status = evt.value + 2; // Blink then on
+                        x360_send_led_report();
+                    } else if(evt.value >= 4 && evt.value <= 7){
+                        x360_led_status = evt.value + 2;
+                        x360_send_led_report();
+                        
+                        x360_led_status = 11;
+                        x360_send_led_report();
+                    } else {
+                        x360_led_status = 10;
+                        x360_send_led_report();
+                    }
+                } else if(evt.type == JNG_CTRL_SOFT_DISCONNECT){
+                    is_soft_disconnected = 1;
+                }
+                break;
+            
             case JNG_EV_FB_LED:
                 if(evt.value == 0){
                     x360_led_status = 0;
@@ -291,6 +324,7 @@ int main(int argc, char* argv[]){
                 }
                 x360_send_led_report();
                 break;
+            
             case JNG_EV_FB_FORCE:
                 if     (evt.what == JNG_FB_FORCE_BIGMOTOR)   x360_ff_big   = evt.value >> 8;
                 else if(evt.what == JNG_FB_FORCE_SMALLMOTOR) x360_ff_small = evt.value >> 8;

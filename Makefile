@@ -1,5 +1,3 @@
-
-
 all: module-build utils-build drivers-build
 
 module-build:

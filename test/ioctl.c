@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include "../joystick-ng.h"
+#include "../include/joystick-ng.h"
 
 #define P(i) printf("%s: %ld\n", #i, i)
 
@@ -15,5 +15,10 @@ int main(){
     P(JNGIOCGETMODE);
     P(JNGIOCSETEVMASK);
     P(JNGIOCGETEVMASK);
+    P(JNGIOCAGRADD);
+    P(JNGIOCAGRDEL);
+    
+    P(JNGCTRLIOCSWDISC);
+    P(JNGCTRLIOCSWAPJS);
     return 0;
 }

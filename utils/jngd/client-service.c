@@ -93,6 +93,18 @@ void* client_service(void* arg){
                 ret = do_drvopt_set(buffer + 1, &len);
                 break;
             
+            case JNGD_ACTION_JS_SOFT_DISCONNECT:
+                printi("fd: %d | Nuova richiesta: [JS_SOFT_DISCONNECT]", sock);
+                
+                ret = do_js_soft_disconnect(buffer + 1, &len);
+                break;
+            
+            case JNGD_ACTION_JS_SWAP:
+                printi("fd: %d | Nuova richiesta: [JS_SWAP]", sock);
+                
+                ret = do_js_swap(buffer + 1, &len);
+                break;
+            
             default:
                 printw("fd: %d | Azione non valida: %02x", sock, buffer[0]);
                 ret = EINVAL;

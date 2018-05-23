@@ -4,7 +4,7 @@ KDIR = /lib/modules/$(KVER)/build
 
 TARGET = joystick_ng
 
-joystick_ng-objs := joystick-ng-core.o joystick-ng-driver-fops.o joystick-ng-client-fops.o queue.o
+joystick_ng-objs := joystick-ng-core.o joystick-ng-control-fops.o joystick-ng-driver-fops.o joystick-ng-client-fops.o list.o
 
 obj-m += joystick_ng.o
 

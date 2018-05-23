@@ -1,7 +1,7 @@
 /*
  * joystick-ng-core.c
  * 
- * Copyright 2015-2017 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2015-2018 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -43,10 +43,13 @@
 #include "joystick-ng-core.h"
 
 // I due device, uno per i driver e uno per i client
-static dev_t       drivers_dev;
+static dev_t       control_dev;  // ?:0
+static struct cdev control_cdev;
+
+static dev_t       drivers_dev;  // ?:1
 static struct cdev drivers_cdev;
 
-static dev_t       clients_dev;
+static dev_t       clients_dev;  // ?:2
 static struct cdev clients_cdev;
 
 // La classe in sysfs
@@ -56,15 +59,17 @@ static struct class* jng_class;
 jng_joystick_t jng_joysticks[JNG_TOT];
 DEFINE_SPINLOCK(jng_joysticks_lock);
 
+DEFINE_RWLOCK(jng_control_lock);
+
 // Inizializzazione
 static int __init jng_init(void){
-    #define _init_fail(op, lbl) do{printe("Errore inizializzazione driver: " # op);goto init_ ## lbl ## _fail;}while(0)
+    #define _init_fail(op, lbl) do{printe("Errore inizializzazione driver: " # op);goto init_rwd_ ## lbl;}while(0)
     
     // Inizalizzazione strutture
-    int i;
+    uint32_t i;
     for(i = 0;i < JNG_TOT;i++){
         jng_joysticks[i].num = i;
-        jng_joysticks[i].driven = 0;
+        jng_joysticks[i].driver = NULL;
         rwlock_init(&jng_joysticks[i].state_lock);
         spin_lock_init(&jng_joysticks[i].feedback_lock);
         
@@ -75,46 +80,57 @@ static int __init jng_init(void){
     }
     
     // Creazione devices (il primo viene messo nel primo argomento, il secondo va calcolato)
-    if(alloc_chrdev_region(&drivers_dev, 0, 2, JNG_DRIVER_NAME) < 0) _init_fail(alloc_chrdev_region, );
-    clients_dev = MKDEV(MAJOR(drivers_dev), 1);
+    if(alloc_chrdev_region(&control_dev, 0, 3, JNG_DRIVER_NAME) < 0) _init_fail(alloc_chrdev_region, start);
+    drivers_dev = MKDEV(MAJOR(control_dev), 1);
+    clients_dev = MKDEV(MAJOR(control_dev), 2);
 
     // Creazione classe
     jng_class = class_create(THIS_MODULE, JNG_DRIVER_NAME);
-    if(!jng_class) _init_fail(class_create, class);
+    if(!jng_class) _init_fail(class_create, chrdev_region);
+    
+    // Creazione device control
+    if(device_create(jng_class, NULL, control_dev, NULL, "jng/" JNG_CONTROL_DEVICE_NAME) < 0) _init_fail(device_create control, class);
+    
+    cdev_init(&control_cdev, &joystick_ng_control_fops);
+    
+    if(cdev_add(&control_cdev, control_dev, 1) < 0) _init_fail(cdev_add control, device_control);
     
     // Creazione device per i driver
-    if(device_create(jng_class, NULL, drivers_dev, NULL, "jng/" JNG_DRIVERS_DEVICE_NAME) < 0) _init_fail(device_create drivers, device_drivers);
+    if(device_create(jng_class, NULL, drivers_dev, NULL, "jng/" JNG_DRIVERS_DEVICE_NAME) < 0) _init_fail(device_create drivers, device_control);
     
     cdev_init(&drivers_cdev, &joystick_ng_driver_fops);
     
-    if(cdev_add(&drivers_cdev, drivers_dev, 1) < 0) _init_fail(cdev_add drivers, add_drivers);
+    if(cdev_add(&drivers_cdev, drivers_dev, 1) < 0) _init_fail(cdev_add drivers, device_drivers);
     
     // Creazione device per i client
-    if(device_create(jng_class, NULL, clients_dev, NULL, "jng/" JNG_CLIENTS_DEVICE_NAME) < 0) _init_fail(device_create clients, device_clients);
+    if(device_create(jng_class, NULL, clients_dev, NULL, "jng/" JNG_CLIENTS_DEVICE_NAME) < 0) _init_fail(device_create clients, device_drivers);
     
     cdev_init(&clients_cdev, &joystick_ng_client_fops);
     
-    if(cdev_add(&clients_cdev, clients_dev, 1) < 0) _init_fail(cdev_add clients, add_clients);
+    if(cdev_add(&clients_cdev, clients_dev, 1) < 0) _init_fail(cdev_add clients, device_clients);
     printi("Inizializzato");
     return 0;
     
     // Qui finiscono i vari fail da sopra, in ordine inverso
-  init_add_clients_fail:
+  init_rwd_device_clients:
     cdev_del(&clients_cdev);
     device_destroy(jng_class, clients_dev);
     
-  init_device_clients_fail:
-  init_add_drivers_fail:
+  init_rwd_device_drivers:
     cdev_del(&drivers_cdev);
     device_destroy(jng_class, drivers_dev);
     
-  init_device_drivers_fail:
+  init_rwd_device_control:
+    cdev_del(&control_cdev);
+    device_destroy(jng_class, control_dev);
+  
+  init_rwd_class:
     class_destroy(jng_class);
   
-  init_class_fail:
+  init_rwd_chrdev_region:
     unregister_chrdev_region(drivers_dev, 2);
   
-  init__fail:
+  init_rwd_start:
     printe("Errore inizializzazione driver");
     return 1;
     
@@ -131,9 +147,12 @@ static void __exit jng_exit(void){
     cdev_del(&drivers_cdev);
     device_destroy(jng_class, drivers_dev);
     
+    cdev_del(&control_cdev);
+    device_destroy(jng_class, control_dev);
+    
     class_destroy(jng_class);
     
-    unregister_chrdev_region(drivers_dev, 2);
+    unregister_chrdev_region(drivers_dev, 3);
     
     printi("Rimosso");
 }
