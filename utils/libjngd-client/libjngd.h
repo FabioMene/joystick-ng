@@ -29,6 +29,11 @@
 #define SOCKET_FILE    "/var/run/jngd.socket"
 #define ELEVATED_GROUP "input"
 
+#define CONTROL_DEVICE "/dev/jng/control"
+
+// Per i tipi
+#include <stdint.h>
+
 // Le funzioni ritornano le costanti E* da errno.h
 
 // Le varie azioni e sotto-azioni
@@ -115,7 +120,21 @@ typedef enum {
     //     1    len valore
     //     len  opzione
     //     len  valore (come stringa terminata)
-    JNGD_ACTION_DRVOPT_SET // [eg]
+    JNGD_ACTION_DRVOPT_SET, // [eg]
+    
+    
+    // Disconnette un joystick in software
+    // [req]
+    //     4    slot
+    JNGD_ACTION_JS_SOFT_DISCONNECT,
+    
+    
+    // Scambia due joystick
+    // [req]
+    //     4    slot_a
+    //     4    slot_b
+    JNGD_ACTION_JS_SWAP,
+
 } jngd_action_e;
 
 
@@ -171,6 +190,12 @@ typedef struct {
     
     // Imposta il valore di un opzione, i parametri sono molto simili a jngd_drvoption_get
     extern int jngd_drvoption_set(const char* option, jngd_option_type_e type, const void* src);
+
+    // Disconnetti un joystick in soft
+    extern int jngd_js_soft_disconnect(uint32_t slot);
+    
+    // Scambia due joystick
+    extern int jngd_js_swap(uint32_t slot_a, uint32_t slot_b);
 #endif
 
 // LIBJNGD_H

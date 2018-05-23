@@ -51,7 +51,7 @@ void usage(char* fmt, ...){
            "  jngctl drv reload\n"
            "    Ricarica le definizioni dei driver dal disco\n"
            "\n"
-           "formato opzioni\n"
+           "formato opzioni (per i comandi 'opt'):\n"
            "  opzione         Opzione globale\n"
            "  driver.opzione  Opzione specifica del driver/Override globale\n"
            "\n"
@@ -66,6 +66,12 @@ void usage(char* fmt, ...){
            "\n"
            "  jngctl opt set <opzione|driver.opzione> <val>\n"
            "    Imposta l'opzione\n"
+           "\n"
+           "  jngctl js disc <n>\n"
+           "    Esegui una disconnessione software del joystick n (1-32)\n"
+           "\n"
+           "  jngctl js swap <a> <b>\n"
+           "    Scambia i joystick a e b\n"
            "\n"
            "  jngctl help\n"
            "    Questo aiuto\n");
@@ -182,7 +188,7 @@ int main(int argc, char* argv[]){
         }
         
         if(strcmp(argv[2], "get") == 0){
-            if(argc < 4) usage("Il comando opt:get richiede almeno un argomento");
+            if(argc < 4) usage("Il comando opt:get richiede un argomento");
             
             char name[256];
             char buffer[256];
@@ -257,7 +263,7 @@ int main(int argc, char* argv[]){
         }
         
         if(strcmp(argv[2], "set") == 0){
-            if(argc < 5) usage("Il comando opt:set richiede almeno un argomento");
+            if(argc < 5) usage("Il comando opt:set richiede due argomenti");
             
             ret = jngd_drvoption_set(argv[3], JNGD_DRVOPT_TYPE_STRING, argv[4]);
             
@@ -268,6 +274,46 @@ int main(int argc, char* argv[]){
         
         usage("Comando opt:%s non riconosciuto", argv[2]);
         return 1;
+    }
+    
+    if(strcmp(argv[1], "js") == 0){
+        if(argc < 3) usage("Il comando js richiede almeno un argomento");
+        
+        if(strcmp(argv[2], "disc") == 0){
+            if(argc < 4) usage("Il comando js:disc richiede un argomento");
+            
+            unsigned int slot;
+            
+            if(sscanf(argv[3], "%ud", &slot) != 1 || slot < 1 || slot > 32) usage("L'argomento '%s' non è un numero compreso tra 1 e 32", argv[3]);
+            
+            slot--;
+            
+            ret = jngd_js_soft_disconnect(slot);
+            
+            CHECK_RET(ret);
+            
+            return 0;
+        }
+        
+        if(strcmp(argv[2], "swap") == 0){
+            if(argc < 5) usage("Il comando js:swap richiede due argomenti");
+            
+            unsigned int slota, slotb;
+            
+            if(sscanf(argv[3], "%ud", &slota) != 1 || slota < 1 || slota > 32) usage("L'argomento '%s' non è un numero compreso tra 1 e 32", argv[3]);
+            if(sscanf(argv[4], "%ud", &slotb) != 1 || slotb < 1 || slotb > 32) usage("L'argomento '%s' non è un numero compreso tra 1 e 32", argv[4]);
+            
+            slota--;
+            slotb--;
+            
+            ret = jngd_js_swap(slota, slotb);
+            
+            CHECK_RET(ret);
+            
+            return 0;
+        }
+        
+        usage("Comando js:%s non riconosciuto", argv[2]);
     }
     
     if(strcmp(argv[1], "help") == 0) usage(NULL);

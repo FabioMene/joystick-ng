@@ -139,5 +139,10 @@ int do_drvopt_get(unsigned char* packet, int* len);
 
 int do_drvopt_set(unsigned char* packet, int* len);
 
+
+int do_js_soft_disconnect(unsigned char* packet, int* len);
+
+int do_js_swap(unsigned char* packet, int* len);
+
 #endif
 

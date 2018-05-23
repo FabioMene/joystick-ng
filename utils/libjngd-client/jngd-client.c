@@ -422,3 +422,44 @@ int jngd_drvoption_set(const char* option, jngd_option_type_e type, const void* 
     
     return -buffer[0];
 }
+
+
+// Disconnetti un joystick
+int jngd_js_soft_disconnect(uint32_t slot){
+    unsigned char buffer[5];
+    
+    // Crea la richiesta
+    buffer[0] = JNGD_ACTION_JS_SOFT_DISCONNECT;
+    memcpy(buffer + 1, &slot, 4);
+    
+    // Invia richiesta
+    if(_jngd_send(buffer, 5) < 0) return -EIO;
+    
+    // Ottieni la risposta
+    int ret = _jngd_recv(buffer, 1);
+    if(ret < 0) return -EIO;
+    if(ret < 1) return -EPROTO;
+    
+    return -buffer[0];
+}
+
+// Scambia due joystick
+extern int jngd_js_swap(uint32_t slot_a, uint32_t slot_b){
+    unsigned char buffer[9];
+    
+    // Crea la richiesta
+    buffer[0] = JNGD_ACTION_JS_SWAP;
+    memcpy(buffer + 1, &slot_a, 4);
+    memcpy(buffer + 5, &slot_b, 4);
+    
+    // Invia richiesta
+    if(_jngd_send(buffer, 9) < 0) return -EIO;
+    
+    // Ottieni la risposta
+    int ret = _jngd_recv(buffer, 1);
+    if(ret < 0) return -EIO;
+    if(ret < 1) return -EPROTO;
+    
+    return -buffer[0];
+}
+
