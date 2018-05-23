@@ -17,5 +17,8 @@ int main(){
     P(JNGIOCGETEVMASK);
     P(JNGIOCAGRADD);
     P(JNGIOCAGRDEL);
+    
+    P(JNGCTRLIOCSWDISC);
+    P(JNGCTRLIOCSWAPJS);
     return 0;
 }

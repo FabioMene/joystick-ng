@@ -53,7 +53,7 @@ static int jng_client_open(struct inode* in, struct file* fp){
     jng_list_init(&jng_connection_data->rbuffer, sizeof(jng_event_ex_t), JNG_MAX_CONN_EV);
     jng_connection_data->r_inc = 0;
     
-    jng_list_init(&jng_connection_data->cl_aggregate, sizeof(jng_aggregate_element_t), JNG_TOT);
+    jng_list_init(&jng_connection_data->client_data.aggregate, sizeof(jng_aggregate_element_t), JNG_TOT);
     
     return 0;
 
@@ -174,8 +174,8 @@ static void jng_gen_aggregate_events_cb(void* el, void* arg){
 static int jng_update_client_events(jng_connection_t* conn){
     // Dividi tra modalità aggregata e non
     if(conn->mode & JNG_RMODE_AGGREGATE){
-        // Itera con callback la lista cl_aggregate
-        jng_list_iter(&conn->cl_aggregate, jng_gen_aggregate_events_cb, conn);
+        // Itera con callback la lista client_data.aggregate
+        jng_list_iter(&conn->client_data.aggregate, jng_gen_aggregate_events_cb, conn);
     } else {
         // Sanity check
         if(conn->joystick == NULL) return -1;
@@ -194,8 +194,8 @@ static int jng_update_client_events(jng_connection_t* conn){
 
 typedef struct {
     jng_joystick_t* joysticks[JNG_TOT];
-    unsigned int    incs[JNG_TOT];
-    int num;
+    uint32_t        incs[JNG_TOT];
+    uint32_t        num;
 } jng_iter_wait_argument_t;
 
 static void jng_fill_wait_argument_cb(void* el, void* arg){
@@ -213,10 +213,11 @@ static int jng_wait_mult_event_interruptible(jng_connection_t* conn){
     jng_iter_wait_argument_t was = {
         .num = 0
     };
-    int i, ret, break_while;
+    uint32_t i;
+    int ret, break_while;
     wait_queue_entry_t* queues;
     
-    jng_list_iter(&conn->cl_aggregate, jng_fill_wait_argument_cb, &was);
+    jng_list_iter(&conn->client_data.aggregate, jng_fill_wait_argument_cb, &was);
     
     queues = kmalloc(sizeof(wait_queue_entry_t) * was.num, GFP_KERNEL);
     if(!queues) return -ENOMEM;
@@ -412,7 +413,7 @@ static unsigned int jng_client_poll(struct file* fp, poll_table* pt){
             .pt = pt
         };
         
-        jng_list_iter(&jng_connection_data->cl_aggregate, jng_add_to_poll_table_cb, &pa);
+        jng_list_iter(&jng_connection_data->client_data.aggregate, jng_add_to_poll_table_cb, &pa);
     } else {
         poll_wait(fp, &jng_connection_data->joystick->state_queue, pt);
     }
@@ -515,7 +516,7 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
                 memset(&jng_connection_data->diff.state_ex, 0, sizeof(jng_state_ex_t));
                 
                 // Cancella le impostazioni di lettura aggregata
-                jng_list_delall(&jng_connection_data->cl_aggregate);
+                jng_list_delall(&jng_connection_data->client_data.aggregate);
             }
             return 0;
         
@@ -538,7 +539,7 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
             if(arg < 0 || arg > JNG_TOT - 1) return -EINVAL;
             
             // Rimuovi l'eventuale copia corrente
-            jng_list_delcb(&jng_connection_data->cl_aggregate, jng_del_unwanted_aggregate_cb, (void*)arg);
+            jng_list_delcb(&jng_connection_data->client_data.aggregate, jng_del_unwanted_aggregate_cb, (void*)arg);
             
             // Crea il nuovo elemento della lista
             tmpagr.js = jng_joysticks + arg;
@@ -548,7 +549,7 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
             tmpagr.inc = 0;
             
             // Aggiungi l'elemento
-            jng_list_append(&jng_connection_data->cl_aggregate, &tmpagr);
+            jng_list_append(&jng_connection_data->client_data.aggregate, &tmpagr);
             
             return 0;
         
@@ -556,7 +557,15 @@ static long jng_client_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
             if((jng_connection_data->mode & JNG_RMODE_AGGREGATE) == 0) return -EINVAL;
             
             // Cancella dalla lista, se presente
-            jng_list_delcb(&jng_connection_data->cl_aggregate, jng_del_unwanted_aggregate_cb, (void*)arg);
+            jng_list_delcb(&jng_connection_data->client_data.aggregate, jng_del_unwanted_aggregate_cb, (void*)arg);
+            
+            return 0;
+        
+        case JNGIOCDROPEVT:
+            jng_update_client_events(jng_connection_data);
+            
+            arg = ~arg;
+            jng_list_delcb(&jng_connection_data->rbuffer, jng_del_unwanted_events_cb, (void*)arg);
             
             return 0;
     }

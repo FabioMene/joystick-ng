@@ -66,7 +66,7 @@ static int __init jng_init(void){
     #define _init_fail(op, lbl) do{printe("Errore inizializzazione driver: " # op);goto init_rwd_ ## lbl;}while(0)
     
     // Inizalizzazione strutture
-    int i;
+    uint32_t i;
     for(i = 0;i < JNG_TOT;i++){
         jng_joysticks[i].num = i;
         jng_joysticks[i].driver = NULL;

@@ -36,10 +36,15 @@
 
 #include "joystick-ng-core.h"
 
+// Questa macro blocca jng_control_lock, copia jng_connection_data->joystick in js e sblocca lo spinlock
+// Se il driver è soft-disconnesso, js sarà uguale a NULL
+#define jng_control_copy_joystick(js) do{jng_control_rlock(); (js) = jng_connection_data->joystick; jng_control_runlock();}while(0)
+
+
 static int jng_driver_open(struct inode* in, struct file* fp){
     // ISO C90 di staminchia
     int _error;
-    int i;
+    uint32_t i;
     jng_joystick_t* js; // Per evitare strani effetti collaterali da control
     
     printi("Nuova connessione con driver");
@@ -64,13 +69,14 @@ static int jng_driver_open(struct inode* in, struct file* fp){
     if(i == JNG_TOT) _open_fail(no joystick free, EMFILE, free_joystick);
     
     // Trovato il joystick, ultime cose
-    jng_control_rlock();
+    jng_control_wlock();
         js = jng_connection_data->joystick = jng_joysticks + i;
-    jng_control_runlock();
+        jng_connection_data->driver_data.soft_connected_inc = -1;
+    jng_control_wunlock();
     
     // Default
-    jng_connection_data->mode     = JNG_MODE_BLOCK;
-    jng_connection_data->evmask   = JNG_EV_CTRL | JNG_EV_FB_FORCE | JNG_EV_FB_LED;
+    jng_connection_data->mode   = JNG_MODE_BLOCK;
+    jng_connection_data->evmask = JNG_EV_CTRL | JNG_EV_FB_FORCE | JNG_EV_FB_LED;
     
     // Coda eventi
     jng_list_init(&jng_connection_data->rbuffer, sizeof(jng_event_t), JNG_MAX_CONN_EV);
@@ -149,9 +155,25 @@ static void jng_gen_driver_events(jng_connection_t* conn){
     memcpy(&conn->diff.feedback_ex, &conn->tmp.feedback_ex, sizeof(jng_feedback_ex_t));
 }
 
+// Genera tutti gli eventi in sospeso, js è NULL safe
+static void jng_update_driver_events(jng_connection_t* conn, jng_joystick_t* js){
+    // Controlla se lo stato feedback è cambiato dall'ultimo controllo,
+    // e se sì, genera eventuali nuovi eventi
+    if(js){
+        if(jng_update_driver_incremental(conn, js) == 0){
+            jng_gen_driver_events(conn);
+        }
+    } else {
+        if(conn->driver_data.soft_connected_inc != conn->r_inc){
+            // Genera l'evento
+            jng_add_driver_event(conn, JNG_EV_CTRL, JNG_CTRL_SOFT_DISCONNECT, 0);
+            conn->driver_data.soft_connected_inc = conn->r_inc;
+        }
+    }
+}
+
 static ssize_t jng_driver_read(struct file* fp, char __user* buffer, size_t len, loff_t* offp){
     jng_joystick_t* js;
-    jng_control_copy_joystick(js);
     
     if(jng_connection_data->mode & JNG_RMODE_EVENT){
         // Modalità ad eventi
@@ -159,15 +181,17 @@ static ssize_t jng_driver_read(struct file* fp, char __user* buffer, size_t len,
         if(len < sizeof(jng_event_t)) return -EINVAL;
         
       jng_drv_rd_read_again:
+      
+        // Copia i dati del joystick
+        jng_control_copy_joystick(js);
         
-        // Controlla se lo stato feedback è cambiato dall'ultimo controllo,
-        // e se sì, genera eventuali nuovi eventi
-        if(jng_update_driver_incremental(jng_connection_data, js) == 0){
-            jng_gen_driver_events(jng_connection_data);
-        }
+        jng_update_driver_events(jng_connection_data, js);
         
         // È possibile che non ci sia nessun evento, in tal caso controlla cosa fare
         if(jng_list_pop(&jng_connection_data->rbuffer, &jng_connection_data->tmp.event)){
+            // Se il joystick è soft-disconnesso ignora i flag
+            if(!js) return -ENOTCONN;
+            // Nonblock
             if(fp->f_flags & O_NONBLOCK) return -EAGAIN;
             // Dobbiamo aspettare
             if(wait_event_interruptible(js->feedback_queue, jng_connection_data->r_inc != js->feedback_inc)) return -ERESTARTSYS;
@@ -186,11 +210,18 @@ static ssize_t jng_driver_read(struct file* fp, char __user* buffer, size_t len,
     if(len >= sizeof(jng_feedback_ex_t)) len = sizeof(jng_feedback_ex_t);
     else                                 len = sizeof(jng_feedback_t);
     
+    // Copia i dati del joystick
+    jng_control_copy_joystick(js);
+    
     // copy_to_user può andare in sleep, ergo non si può usare con uno spinlock bloccato
     // La procedura è fblock --> joystick->tmp --> fbunlock --> tmp->user
-    jng_feedback_lock(js);
-        memcpy(&jng_connection_data->tmp.feedback_ex, &js->feedback_ex, len);
-    jng_feedback_unlock(js);
+    if(js){
+        jng_feedback_lock(js);
+            memcpy(&jng_connection_data->tmp.feedback_ex, &js->feedback_ex, len);
+        jng_feedback_unlock(js);
+    }
+    
+    jng_connection_data->tmp.feedback_ex.control.soft_connected = js != NULL;
     
     return copy_to_user(buffer, &jng_connection_data->tmp.feedback_ex, len) ? -EFAULT : len;
 }
@@ -201,6 +232,9 @@ static ssize_t jng_driver_write(struct file* fp, const char __user* buffer, size
     
     if(jng_connection_data->mode & JNG_WMODE_EVENT){
         if(len < sizeof(jng_event_t)) return -EINVAL;
+        
+        if(!js) return sizeof(jng_event_t);
+        
         if(copy_from_user(&jng_connection_data->tmp.event, buffer, sizeof(jng_event_t)) != 0) return -EFAULT;
         
         // Solo un driver è collegato ad un dato joystick in un dato momento, ergo non crea problemi l'uso di
@@ -247,6 +281,8 @@ static ssize_t jng_driver_write(struct file* fp, const char __user* buffer, size
     // Mod a blocchi
     if(len < sizeof(jng_state_t)) return -EINVAL;
 
+    if(!js) return sizeof(jng_state_t);
+
     // stesso problema di read, copy_from_user può attendere
     // quindi la procedura è user->tmp --> wlock --> tmp->joystick --> wunlock
     if(copy_from_user(&jng_connection_data->tmp.state_ex.state, buffer, sizeof(jng_state_t)) != 0) return -EFAULT;
@@ -271,8 +307,8 @@ static unsigned int jng_driver_poll(struct file* fp, poll_table* pt){
     // in scrittura invece non blocca mai
     mask = POLLOUT | POLLWRNORM;
     
-    // Aggiungi comunque la coda eventi
-    poll_wait(fp, &js->feedback_queue, pt);
+    // Aggiungi la coda eventi alla tabella, ma solo se collegato
+    if(js) poll_wait(fp, &js->feedback_queue, pt);
     
     // Controlla la mod di lettura
     // In mod eventi se c'è almeno un evento in coda ritorna "leggibile"
@@ -280,9 +316,7 @@ static unsigned int jng_driver_poll(struct file* fp, poll_table* pt){
         // In modalità eventi fa gli stessi controlli di read()
         // e ritorna POLLIN solo se c'è almeno un evento
         
-        if(jng_update_driver_incremental(jng_connection_data, js) == 0){
-            jng_gen_driver_events(jng_connection_data);
-        }
+        jng_update_driver_events(jng_connection_data, js);
         
         if(jng_list_len(&jng_connection_data->rbuffer) != 0){
             mask |= POLLIN | POLLRDNORM;
@@ -304,37 +338,67 @@ static int jng_driver_fsync(struct file* fp, loff_t start, loff_t end, int datas
     // Cancella la coda degli eventi
     jng_list_delall(&jng_connection_data->rbuffer);
     
-    // Aggiorna le differenze. Non è necessario controllare js, dato che viene assegnato dal kernel in open()
-    jng_feedback_lock(js);
-        memcpy(&jng_connection_data->tmp.feedback_ex, &js->feedback_ex, sizeof(jng_feedback_ex_t));
-    jng_feedback_unlock(js);
+    // Aggiorna le differenze
+    if(js){
+        jng_feedback_lock(js);
+            memcpy(&jng_connection_data->tmp.feedback_ex, &js->feedback_ex, sizeof(jng_feedback_ex_t));
+        jng_feedback_unlock(js);
+    }
+    
+    // Aggiorna l'incrementale di generazione JNG_CTRL_SOFT_DISCONNECT
+    jng_connection_data->driver_data.soft_connected_inc = jng_connection_data->r_inc;
     
     memcpy(&jng_connection_data->diff.feedback_ex, &jng_connection_data->tmp.feedback_ex, sizeof(jng_feedback_ex_t));
     return 0;
 }
 
 static int jng_del_unwanted_events_cb(void* el, void* arg){
-    return !(*((unsigned int*)arg) & ((jng_event_t*)el)->type);
+    return !(*((uint32_t*)arg) & ((jng_event_t*)el)->type);
 }
 
 static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long arg){
     int rc;
+    uint32_t i;
     jng_joystick_t* js;
     jng_control_copy_joystick(js);
     
-    printi("ioctl driver %d: %d(%ld)", js->num, cmd, arg);
+    printi("ioctl driver %d: %d(%ld)", (js)? js->num : -1, cmd, arg);
     switch(cmd){
         case JNGIOCSETSLOT: // Solo client
             return -EINVAL;
         
         case JNGIOCGETSLOT:
-            return copy_to_user((unsigned int*)arg, &js->num, sizeof(unsigned int)) ? -EFAULT : 0;
+            if(!js) return -ENOTCONN;
+            return copy_to_user((uint32_t*)arg, &js->num, sizeof(uint32_t)) ? -EFAULT : 0;
         
         
         case JNGIOCSETINFO:
+            if(!js){ // Ricollega i joystick
+                // Trova un joystick libero
+                spin_lock(&jng_joysticks_lock);
+                    for(i = 0;i < JNG_TOT;i++){
+                        if(jng_joysticks[i].driver == NULL){
+                            jng_joysticks[i].driver = jng_connection_data;
+                            // ctrl: slot
+                            jng_joysticks[i].feedback_ex.control.slot = jng_joysticks[i].num; // js.num equivale a i, per ora almeno.
+                            break;
+                        }
+                    }
+                spin_unlock(&jng_joysticks_lock);
+                if(i == JNG_TOT) return -EMFILE;
+                
+                jng_control_wlock();
+                    js = jng_connection_data->joystick = jng_joysticks + i;
+                    jng_connection_data->driver_data.soft_connected_inc = jng_connection_data->r_inc - 1;
+                jng_control_wunlock();
+                
+                printi("Driver ricollegato al joystick %d", js->num);
+            }
+            
             jng_state_wlock(js);
                 rc = copy_from_user(&js->info, (jng_info_t*)arg, sizeof(jng_info_t));
-                js->info.connected = 1;
+                js->state_ex.control.connected = 1;
+                js->info.connected             = 1;
                 
                 // JNG_CTRL_INFO_CHANGED
                 js->state_ex.control.last_info_inc = ++js->state_inc;
@@ -343,6 +407,7 @@ static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
             return rc ? -EFAULT : 0;
         
         case JNGIOCGETINFO: // Perchè un driver dovrebbe volere le sue info? mah
+            if(!js) return -ENOTCONN;
             jng_state_rlock(js);
                 rc = copy_to_user((jng_info_t*)arg, &js->info, sizeof(jng_info_t));
             jng_state_runlock(js);
@@ -363,7 +428,7 @@ static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
             return 0;
         
         case JNGIOCGETMODE:
-            return copy_to_user((unsigned int*)arg, &jng_connection_data->mode, sizeof(unsigned int)) ? -EFAULT : 0;
+            return copy_to_user((unsigned int*)arg, &jng_connection_data->mode, sizeof(uint32_t)) ? -EFAULT : 0;
         
         
         case JNGIOCSETEVMASK:
@@ -374,36 +439,52 @@ static long jng_driver_ioctl(struct file* fp, unsigned int cmd, unsigned long ar
             return 0;
         
         case JNGIOCGETEVMASK:
-            return copy_to_user((unsigned int*)arg, &jng_connection_data->evmask, sizeof(unsigned int)) ? -EFAULT : 0;
+            return copy_to_user((unsigned int*)arg, &jng_connection_data->evmask, sizeof(uint32_t)) ? -EFAULT : 0;
         
         case JNGIOCAGRADD: // Solo client
             return -EINVAL;
         
         case JNGIOCAGRDEL: // Solo client
             return -EINVAL;
+        
+        case JNGIOCDROPEVT:
+            // Genera gli eventi in coda
+            jng_update_driver_events(jng_connection_data, js);
+            
+            // Cancella gli eventi extra. Il callback jng_del_unwanted_events_cb cancella gli eventi
+            // NON presenti in arg
+            arg = ~arg;
+            jng_list_delcb(&jng_connection_data->rbuffer, jng_del_unwanted_events_cb, &arg);
+            
+            return 0;
     }
     return -ENOTTY;
 }
 
 static int jng_driver_release(struct inode* in, struct file* fp){
     jng_joystick_t* js;
+    jng_control_copy_joystick(js);
     
-    jng_control_wlock();
-    spin_lock(&jng_joysticks_lock);
-        js->driver = NULL;
-        memset(&js->state_ex.state, 0, sizeof(jng_state_t));
-    spin_unlock(&jng_joysticks_lock);
-    jng_control_wunlock();
-    
-    // JNG_CTRL_CONNECTION
-    jng_state_wlock(js);
-        js->info.connected = 0;
+    if(js){
+        printi("Connessione con driver per il joystick %d chiusa", js->num);
+        // Rilascio il joystick, poi i dati
+        spin_lock(&jng_joysticks_lock);
+            js->driver = NULL;
+            memset(&js->state_ex.state, 0, sizeof(jng_state_t));
+        spin_unlock(&jng_joysticks_lock);
         
-        js->state_ex.control.connected = 0;
-        js->state_inc++;
-    jng_state_wunlock(js);
-    
-    wake_up_interruptible(&js->state_queue); // Risveglia i client in ascolto
+        // JNG_CTRL_CONNECTION
+        jng_state_wlock(js);
+            js->info.connected = 0;
+            
+            js->state_ex.control.connected = 0;
+            js->state_inc++;
+        jng_state_wunlock(js);
+        
+        wake_up_interruptible(&js->state_queue); // Risveglia i client in ascolto
+    } else {
+        printi("Connessione con driver per un joystick disconnesso in software chiusa");
+    }
     
     kfree(fp->private_data);
     

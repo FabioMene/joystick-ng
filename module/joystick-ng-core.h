@@ -61,36 +61,45 @@ struct jng_connection_s;
 
 // Rappresenta un joystick, NON necessariamente connesso
 typedef struct {
-    unsigned int   num;
+    uint32_t num;
     
     // Non NULL se un driver lo sta gestendo (Questa è la connessione col driver)
     struct jng_connection_s* driver;
     
-    jng_info_t        info;
+    jng_info_t info;
     
     // Stato input
-    jng_state_ex_t    state_ex;
+    jng_state_ex_t state_ex;
     // RWLock sullo stato del joystick (client: reader, driver: writer)
-    rwlock_t          state_lock;
+    rwlock_t state_lock;
     // Coda e incrementale (per tenere traccia dei cambiamenti)
     wait_queue_head_t state_queue;
-    unsigned int      state_inc;
+    uint32_t          state_inc;
     
     // Stato output
     jng_feedback_ex_t feedback_ex;
     // Spinlock perché un solo driver gestisce un joystick, ergo un solo reader per volta
-    spinlock_t        feedback_lock;
+    spinlock_t feedback_lock;
     // Coda e incrementale
     wait_queue_head_t feedback_queue;
-    unsigned int      feedback_inc;
+    uint32_t          feedback_inc;
 } jng_joystick_t;
+
+
+/// Membri di jng_connection_t specifici per client
 
 // Elemento della lista cl_aggregate, usato dai client in mod. aggregata
 typedef struct {
     jng_joystick_t* js;   // Joystick associato
     jng_state_ex_t  diff; // Differenze per questo joystick
-    unsigned int    inc;  // Incrementale
+    uint32_t        inc;  // Incrementale
 } jng_aggregate_element_t;
+
+
+/// Membri di jng_connection_t specifici per driver
+
+// Nessuno per ora
+
 
 // Dati connessione, valido per client e server
 typedef struct jng_connection_s {
@@ -118,19 +127,28 @@ typedef struct jng_connection_s {
     } diff; 
     
     // Modo lettura/scrittura
-    unsigned int    mode;
+    uint32_t mode;
     
     // Eventi da considerare
-    unsigned int    evmask;
+    uint32_t evmask;
     
     // Buffer di eventi di lettura. Gli eventi in scrittura aggiornano la parte corrispondente
-    jng_list_t      rbuffer;
+    jng_list_t rbuffer;
     // Valore da confrontare con quello del joystick, il che in teoria non crea race conditions
     // L'incremento di state_inc e feedback_inc avviene invece atomicamente
-    unsigned int    r_inc;
+    uint32_t r_inc;
     
-    // Lista dei joystick in modalità aggregata
-    jng_list_t      cl_aggregate;
+    union {
+        struct {
+            // Lista dei joystick in modalità aggregata
+            jng_list_t aggregate;
+        } client_data;
+        
+        struct {
+            // L'incrementale dell'ultima volta che è stato generato l'evento JNG_CTRL_SOFT_DISCONNECT
+            int32_t soft_connected_inc;
+        } driver_data;
+    };
 } jng_connection_t;
 
 // Scorciatoie tattica, da usare in joystick-ng-{driver,client}-fops.c dove struct file* fp è definito
@@ -188,10 +206,6 @@ static __always_inline void jng_control_rlock(void){
 static __always_inline void jng_control_runlock(void){
     read_unlock(&jng_control_lock);
 }
-
-// Questa macro blocca jng_control_lock, copia jng_connection_data->joystick in js e sblocca lo spinlock
-#define jng_control_copy_joystick(js) do{jng_control_rlock();(js) = jng_connection_data->joystick;jng_control_runlock();}while(0)
-
 
 static __always_inline void jng_control_wlock(void){
     write_lock(&jng_control_lock);

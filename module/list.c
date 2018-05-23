@@ -98,11 +98,10 @@ int jng_list_pop(jng_list_t* l, void* dest){
 }
 
 
-int jng_list_get(jng_list_t* l, void* dest, int pos){
+int jng_list_get(jng_list_t* l, void* dest, unsigned int pos){
     LOCK();
     
     // Sanity check
-    if(pos < 0) RET_UNLOCK(-1);
     if(pos >= l->buflen) RET_UNLOCK(-1);
     
     // Copia
@@ -122,7 +121,7 @@ unsigned int jng_list_len(jng_list_t* l){
 }
 
 void jng_list_iter(jng_list_t* l, void(*cb)(void*, void*), void* arg){
-    int i;
+    unsigned int i;
     
     spin_lock(&l->access_spinlock);
     
@@ -143,7 +142,7 @@ void jng_list_iter(jng_list_t* l, void(*cb)(void*, void*), void* arg){
 //
 //  
 
-int jng_list_del(jng_list_t* l, int pos){
+int jng_list_del(jng_list_t* l, unsigned int pos){
     LOCK();
     
     // Sanity check
@@ -172,7 +171,7 @@ int jng_list_del(jng_list_t* l, int pos){
 
 
 int jng_list_delcb(jng_list_t* l, int(*cb)(void*, void*), void* arg){
-    int i, n = 0;
+    unsigned int i, n = 0;
     
     // Non è possibile chiamare jng_list_del dato che andrebbe in deadlock
     LOCK();

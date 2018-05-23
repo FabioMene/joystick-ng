@@ -34,17 +34,97 @@
 
 #include "joystick-ng-core.h"
 
-// Protocollo control
+// Protocollo control (molto stateless)
 
 static int jng_control_open(struct inode* in, struct file* fp){
-    int a = 0;
-    int b = 1;
+    return 0;
+}
+
+// Niente read e write
+static ssize_t jng_control_read(struct file* fp, char __user* buffer, size_t len, loff_t* offp){
+    return -EINVAL;
+}
+
+static ssize_t jng_control_write(struct file* fp, const char __user* buffer, size_t len, loff_t* offp){
+    return -EINVAL;
+}
+
+static int jng_control_release(struct inode* in, struct file* fp){
+    return 0;
+}
+
+
+// Prototipi
+static int jng_ctrl_swdisconnect(uint32_t slot);
+static int jng_ctrl_swap(uint32_t a, uint32_t b);
+
+
+static long jng_control_ioctl(struct file* fp, unsigned int cmd, unsigned long arg){
+    printi("ioctl ctrl %d(%ld)", cmd, arg);
     
+    switch(cmd){
+        case JNGCTRLIOCSWDISC:
+            return jng_ctrl_swdisconnect(arg);
+        
+        case JNGCTRLIOCSWAPJS: {
+            uint32_t slots[2];
+            if(copy_from_user(slots, (void*)arg, sizeof(uint32_t[2]))) return -EFAULT;
+            
+            return jng_ctrl_swap(slots[0], slots[1]);
+        }
+    }
+    
+    return -ENOTTY;
+}
+
+
+// Funzioni
+
+static int jng_ctrl_swdisconnect(uint32_t slot){
+    int wake = 0;
+    
+    if(slot > JNG_TOT - 1) return -EINVAL;
+    
+    spin_lock(&jng_joysticks_lock);
+        jng_control_wlock();
+        
+            if(jng_joysticks[slot].driver){
+                jng_joysticks[slot].driver->joystick = NULL;
+                jng_joysticks[slot].driver = NULL;
+                
+                jng_joysticks[slot].state_ex.control.connected = 0;
+                jng_joysticks[slot].info.connected             = 0;
+                
+                jng_state_wlock(jng_joysticks + slot);
+                    jng_joysticks[slot].state_inc++;
+                jng_state_wunlock(jng_joysticks + slot);
+                
+                jng_feedback_lock(jng_joysticks + slot);
+                    jng_joysticks[slot].feedback_inc++;
+                jng_feedback_unlock(jng_joysticks + slot);
+                
+                wake = 1;
+            }
+        
+        jng_control_wunlock();
+    spin_unlock(&jng_joysticks_lock);
+    
+    if(wake){
+        wake_up_interruptible(&jng_joysticks[slot].state_queue);
+        wake_up_interruptible(&jng_joysticks[slot].feedback_queue);
+    }
+    
+    return 0;
+}
+
+static int jng_ctrl_swap(uint32_t a, uint32_t b){
     // Per segnalare le code dopo aver rilasciato gli spinlock
     int wake_driver_a = 0;
     int wake_driver_b = 0;
     
-    // Swap 0 e 1
+    // Sanity check
+    if(a > JNG_TOT - 1 || b > JNG_TOT - 1) return -EINVAL;
+    if(a == b) return -EINVAL;
     
     jng_control_wlock();
     
@@ -55,7 +135,7 @@ static int jng_control_open(struct inode* in, struct file* fp){
     if(jng_joysticks[a].driver == NULL && jng_joysticks[b].driver == NULL){
         spin_unlock(&jng_joysticks_lock);
         jng_control_wunlock();
-        return -EACCES;
+        return 0;
     }
     
     write_lock(&jng_joysticks[a].state_lock);
@@ -67,8 +147,8 @@ static int jng_control_open(struct inode* in, struct file* fp){
     // Uno slot è vuoto
     if(jng_joysticks[a].driver == NULL || jng_joysticks[b].driver == NULL){
         // Ottieni il nuovo indice del joystick connesso e disconnesso 
-        int n_conn    = (jng_joysticks[a].driver)? b : a;
-        int n_notconn = (n_conn == a)? b : a;
+        uint32_t n_conn    = (jng_joysticks[a].driver)? b : a;
+        uint32_t n_notconn = (n_conn == a)? b : a;
         
         
         // Aggiorna il joystick 'ora connesso'
@@ -169,23 +249,9 @@ static int jng_control_open(struct inode* in, struct file* fp){
     wake_up_interruptible(&jng_joysticks[a].state_queue);
     wake_up_interruptible(&jng_joysticks[b].state_queue);
     
-    return -EPERM;
+    return 0;
 }
 
-
-static ssize_t jng_control_read(struct file* fp, char __user* buffer, size_t len, loff_t* offp){
-    return -EINVAL;
-}
-
-
-static ssize_t jng_control_write(struct file* fp, const char __user* buffer, size_t len, loff_t* offp){
-    return -EINVAL;
-}
-
-
-static int jng_control_release(struct inode* in, struct file* fp){
-    return -EINVAL;
-}
 
 // Le operazioni
 struct file_operations joystick_ng_control_fops = {
@@ -196,6 +262,9 @@ struct file_operations joystick_ng_control_fops = {
     
     .read           = jng_control_read,
     .write          = jng_control_write,
+    
+    .unlocked_ioctl = jng_control_ioctl,
+    .compat_ioctl   = jng_control_ioctl,
     
     .release        = jng_control_release,
     

@@ -30,15 +30,15 @@
 //  -1 in caso di problemi di memoria o di posizione (es pos < 0) e lista piena/vuota
 
 typedef struct {
-    spinlock_t     access_spinlock;
+    spinlock_t access_spinlock;
     
     //
     unsigned char* buffer;
     // Numero di elementi nel buffer (dimensione buffer = buflen * element_len)
-    unsigned int   buflen;
+    unsigned int buflen;
     
-    unsigned int   element_len;
-    unsigned int   element_limit;
+    unsigned int element_len;
+    unsigned int element_limit;
 } jng_list_t;
 
 // Inizializza una lista, con 0 elementi
@@ -66,11 +66,11 @@ int jng_list_pop(jng_list_t* l, void* dest);
 
 
 // Ottiene l'elemento pos-esimo
-int jng_list_get(jng_list_t* l, void* dest, int pos);
+int jng_list_get(jng_list_t* l, void* dest, unsigned int pos);
 
 
 // Cancella l'elemento pos-esimo
-int jng_list_del(jng_list_t* l, int pos);
+int jng_list_del(jng_list_t* l, unsigned int pos);
 
 
 // Itera tutti gli elementi della lista. Il callback ha prototipo
