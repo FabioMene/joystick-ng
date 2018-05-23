@@ -75,6 +75,10 @@ int blink_leds = 0;
 
 int set_led_on_slot_change = 0;
 
+unsigned char orig_leds = 0;
+
+int is_soft_disconnected = 0;
+
 void ds3_update_feedback(int cstate){
     switch(event.type){
         case JNG_EV_CTRL:
@@ -87,6 +91,10 @@ void ds3_update_feedback(int cstate){
                 if(slot == 1 || slot == 5 || slot >= 8) ds3_control_packet[9] |= 0x04;
                 if(slot == 2 || slot >= 6) ds3_control_packet[9] |= 0x08;
                 if(slot >= 3) ds3_control_packet[9] |= 0x10;
+                
+                ioctl(jngfd, JNGIOCDROPEVT, JNG_EV_FB_LED);
+            } else if(event.what == JNG_CTRL_SOFT_DISCONNECT){
+                is_soft_disconnected = 1;
             }
             break;
         
@@ -121,6 +129,8 @@ void ds3_update_feedback(int cstate){
     ds3_control_packet[18] = Toff;
     ds3_control_packet[23] = Toff;
     ds3_control_packet[28] = Toff;
+    
+    if(is_soft_disconnected) ds3_control_packet[9] = 0x1e;
 }
 
 short get_threshold(char val){
@@ -278,6 +288,8 @@ int main(int argc, char* argv[]){
         if(l3) ds3_control_packet[9] |= 0x08;
         if(l4) ds3_control_packet[9] |= 0x10;
         
+        orig_leds = ds3_control_packet[9];
+        
         feedback_changed = 1;
     }
     
@@ -331,6 +343,17 @@ int main(int argc, char* argv[]){
         state.gyrometer.x     = (report.gyroX - 128) << 8;
         
         write(jngfd, &state, sizeof(jng_state_t));
+        
+        if(is_soft_disconnected && report.ps){
+            // Riattiva il joystick
+            ioctl(jngfd, JNGIOCSETINFO, &jng_info);
+            
+            // Reimposta i led
+            ds3_control_packet[9] = orig_leds;
+            feedback_changed = 1;
+            
+            is_soft_disconnected = 0;
+        }
         
         // Passa da jng_feedback_ex_t al joystick
         if(read(jngfd, &event, sizeof(jng_event_t)) > 0){

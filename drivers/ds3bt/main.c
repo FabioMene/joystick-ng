@@ -86,6 +86,8 @@ typedef struct {
     int set_led_on_slot_change; // Dalle opzioni
     
     unsigned char blevel;
+    
+    int soft_disconnect; // Settato a 1 se siamo stati soft-disconnessi
 } sender_thread_arg_t;
 
 void server_sigterm_handler(int sig){
@@ -273,7 +275,9 @@ int client_loop(int ctrl, int intr){
         .ctrlfd = ctrl,
         
         .blevel = 255,
-        .set_led_on_slot_change = 0
+        .set_led_on_slot_change = 0,
+        
+        .soft_disconnect = 0
     };
     
     int jngfd = open("/dev/jng/driver", O_RDWR | O_NONBLOCK);
@@ -448,7 +452,13 @@ int client_loop(int ctrl, int intr){
                 close_cause  = "inattività";
             }
         }
-            
+        
+        // Controllo disconnessione soft
+        if(arg.soft_disconnect){
+            should_close = 1;
+            close_cause  = "Disconnessione software";
+        }
+        
         if(should_close){
             break;
         }
@@ -547,7 +557,11 @@ void* sender_thread_loop(void* varg){
                     if(slot == 1 || slot == 5 || slot >= 8) ds3_control_packet[11] |= 0x04;
                     if(slot == 2 || slot >= 6) ds3_control_packet[11] |= 0x08;
                     if(slot >= 3) ds3_control_packet[11] |= 0x10;
-                }
+                    
+                    ioctl(arg->jngfd, JNGIOCDROPEVT, JNG_EV_FB_LED);
+                } else if(ev.what == JNG_CTRL_SOFT_DISCONNECT){
+                    arg->soft_disconnect = 1;
+                } else changed = 0;
                 break;
             
             case JNG_EV_FB_FORCE:

@@ -108,6 +108,8 @@ void x360_send_ff_report(){
     }
 }
 
+int is_soft_disconnected = 0;
+
 int axis_deadzone;
 
 short get_threshold(short val){
@@ -273,6 +275,12 @@ int main(int argc, char* argv[]){
             state.axis.RY = get_threshold(-report.RY - 1);
             
             write(jngfd, &state, sizeof(jng_state_t));
+            
+            if(is_soft_disconnected && (report.keys2 & 0x04)){
+                ioctl(jngfd, JNGIOCSETINFO, &jng_info);
+                
+                is_soft_disconnected = 0;
+            }
         }
         
         jng_event_t evt;
@@ -292,6 +300,8 @@ int main(int argc, char* argv[]){
                         x360_led_status = 10;
                         x360_send_led_report();
                     }
+                } else if(evt.type == JNG_CTRL_SOFT_DISCONNECT){
+                    is_soft_disconnected = 1;
                 }
                 break;
             
