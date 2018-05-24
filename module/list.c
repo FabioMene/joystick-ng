@@ -172,11 +172,15 @@ int jng_list_del(jng_list_t* l, unsigned int pos){
 
 int jng_list_delcb(jng_list_t* l, int(*cb)(void*, void*), void* arg){
     unsigned int i, n = 0;
+    int exit_cycle = 0; // Unsigned e overflow, belle cose
     
     // Non è possibile chiamare jng_list_del dato che andrebbe in deadlock
     LOCK();
     
-    for(i = l->buflen - 1;i >= 0;i--){
+    // Controlla che la lista contenga almeno un elemento
+    if(l->buflen == 0) RET_UNLOCK(0);
+    
+    for(i = l->buflen - 1;exit_cycle == 0;i--){
         if(cb(l->buffer + i * l->element_len, arg)){
             // Copiato spudoratamente da jng_list_del
             if(i != l->buflen - 1)
@@ -191,6 +195,8 @@ int jng_list_delcb(jng_list_t* l, int(*cb)(void*, void*), void* arg){
             
             n++;
         }
+        
+        if(i == 0) exit_cycle = 1;
     }
     
     // Sistema lo spazio allocato

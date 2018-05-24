@@ -83,6 +83,7 @@ typedef struct {
     int ctrlfd;
     
     int blink; // Dalle opzioni
+    int startup_leds;
     int set_led_on_slot_change; // Dalle opzioni
     
     unsigned char blevel;
@@ -282,6 +283,8 @@ int client_loop(int ctrl, int intr){
         .ctrlfd = ctrl,
         
         .blevel = 255,
+        
+        .startup_leds = -1,
         .set_led_on_slot_change = 0,
         
         .soft_disconnect = 0
@@ -299,53 +302,28 @@ int client_loop(int ctrl, int intr){
     int res;
     jngd_drvoption_get("set_leds", JNGD_DRVOPT_TYPE_INT, &res);
     if(res){
-        // Questo dimostra la flessibilità di joystick-ng
-        unsigned int slot;
-        ioctl(jngfd, JNGIOCGETSLOT, &slot);
+        arg.startup_leds = 0;
         
-        int dfd = open("/dev/jng/device", O_RDWR);
-        ioctl(dfd, JNGIOCSETSLOT, slot);
-        ioctl(dfd, JNGIOCSETMODE, JNG_MODE_EVENT);
-        
-        int l1 = 0, l2 = 0, l3 = 0, l4 = 0;
         char strres[256];
         
         if(res == 2){ // Led fissi
             jngd_drvoption_get("fixed_leds", JNGD_DRVOPT_TYPE_STRING, strres);
-            l4 = strres[0] != '0';
-            l3 = strres[1] != '0';
-            l2 = strres[2] != '0';
-            l1 = strres[3] != '0';
+            if(strres[0] != '0') arg.startup_leds |= 0x10;
+            if(strres[1] != '0') arg.startup_leds |= 0x08;
+            if(strres[2] != '0') arg.startup_leds |= 0x04;
+            if(strres[3] != '0') arg.startup_leds |= 0x02;
         } else { // In base allo slot
             arg.set_led_on_slot_change = 1;
             
+            int slot;
+            ioctl(jngfd, JNGIOCGETSLOT, &slot);
+            
             slot += 1;
-            if(slot == 1 || slot == 5 || slot == 8 || slot >= 10) l1 = 1;
-            if(slot == 2 || slot == 6 || slot >= 9) l2 = 1;
-            if(slot == 3 || slot >= 7) l3 = 1;
-            if(slot >= 4) l4 = 1;
+            if(slot == 1 || slot == 5 || slot == 8 || slot >= 10) arg.startup_leds |= 0x02;
+            if(slot == 2 || slot == 6 || slot >= 9) arg.startup_leds |= 0x04;
+            if(slot == 3 || slot >= 7) arg.startup_leds |= 0x08;
+            if(slot >= 4) arg.startup_leds |= 0x10;
         }
-        
-        jng_event_t ev;
-        ev.type = JNG_EV_FB_LED;
-        
-        ev.what  = JNG_FB_LED_1;
-        ev.value = l1;
-        write(dfd, &ev, sizeof(jng_event_t));
-        
-        ev.what  = JNG_FB_LED_2;
-        ev.value = l2;
-        write(dfd, &ev, sizeof(jng_event_t));
-        
-        ev.what  = JNG_FB_LED_3;
-        ev.value = l3;
-        write(dfd, &ev, sizeof(jng_event_t));
-        
-        ev.what  = JNG_FB_LED_4;
-        ev.value = l4;
-        write(dfd, &ev, sizeof(jng_event_t));
-        
-        close(dfd);
     }
     
     // Imposta il thread che si occupa di gestire l'output
@@ -530,6 +508,14 @@ void* sender_thread_loop(void* varg){
     sender_thread_arg_t* arg = (sender_thread_arg_t*)varg;
     jng_event_t ev;
     
+    if(arg->startup_leds){
+        // Scarta i dati led
+        ioctl(arg->jngfd, JNGIOCDROPEVT, JNG_EV_FB_LED);
+        
+        // Imposta i led
+        ds3_control_packet[11] = arg->startup_leds;
+    }
+    
     // Invia il primo pacchetto
     send(arg->ctrlfd, ds3_control_packet, 50, 0);
     recv(arg->ctrlfd, dummy_buffer, 50, 0);
@@ -567,6 +553,7 @@ void* sender_thread_loop(void* varg){
                     if(slot == 2 || slot >= 6) ds3_control_packet[11] |= 0x08;
                     if(slot >= 3) ds3_control_packet[11] |= 0x10;
                     
+                    // Scarta i dati led fino ad ora
                     ioctl(arg->jngfd, JNGIOCDROPEVT, JNG_EV_FB_LED);
                 } else if(ev.what == JNG_CTRL_SOFT_DISCONNECT){
                     arg->soft_disconnect = 1;
