@@ -1,0 +1,12 @@
+[Unit]
+Description=jng ds3bt helper (cleanup after bluetooth.service stop)
+BindsTo=bluetooth.service
+
+[Service]
+Type=simple
+RemainAfterExit=true
+ExecStart=/bin/true
+ExecStop=/usr/local/bin/jng-ds3bt-helper on-bt-stop
+
+[Install]
+WantedBy=bluetooth.service

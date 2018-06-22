@@ -1,0 +1,12 @@
+[Unit]
+Description=jng ds3bt helper (after resume/thaw)
+Requires=joystick-ng.service
+After=suspend.target
+
+[Service]
+Type=simple
+RemainAfterExit=false
+ExecStart=/usr/local/bin/jng-ds3bt-helper after-resume
+
+[Install]
+WantedBy=sleep.target

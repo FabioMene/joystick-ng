@@ -1,0 +1,11 @@
+[Unit]
+Description=jng ds3bt helper (before bluetooth.service)
+Requires=joystick-ng.service
+Before=bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/jng-ds3bt-helper before-bt-start
+
+[Install]
+WantedBy=bluetooth.service

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Helper for ds3bt start/stop
+
+if [ x"$(jngctl opt get ds3bt.autostart)" = x"0" ]; then
+    # Autostart (and systemd services/helper) disabled
+    exit 0
+fi
+
+case "$1" in
+    before-bt-start)  # Before bluetooth.service (jng-ds3bt-helper-beforebt.service)
+        # (Re)start daemon
+        jngctl drv launch ds3bt stop
+        
+        sleep 1
+        
+        jngctl drv launch ds3bt autostart
+    ;;
+    
+    after-bt-start)  # After bluetooth.service (jng-ds3bt-helper-afterbt.service)
+        # Wait for bluetooth.service to fully start
+        sleep 5
+        
+        # Setup bluetooth pscan
+        hciconfig hci0 pscan
+    ;;
+    
+    on-bt-stop)  # After bluetooth.service is stopped (jng-ds3bt-helper-onbtstop.service)
+        # Stop daemon
+        jngctl drv launch ds3bt stop
+    ;;
+    
+    after-resume)  # Restart bluetooth.service after resume/thaw (jng-ds3bt-helper-afterresume.service)
+        # Wait some time
+        sleep 5
+        
+        systemctl restart bluetooth.service
+    ;;
+esac
