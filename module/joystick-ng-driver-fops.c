@@ -487,8 +487,6 @@ static int jng_driver_release(struct inode* in, struct file* fp){
     }
     
     kfree(fp->private_data);
-    
-    printi("Connessione con driver per il joystick %d chiusa", js->num);
     return 0;
 }
 
