@@ -1,0 +1,2 @@
+# Configurazione per il driver xoneusb
+exec=/usr/local/share/jng/drivers/xoneusb

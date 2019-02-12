@@ -1,0 +1,43 @@
+# joystick-ng driver xoneusb
+
+## Microsoft 045e
+# pad originale
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="045e", ATTR{idProduct}=="02d1", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'Microsoft' ''"
+
+# pad originale, firmware 2015
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="045e", ATTR{idProduct}=="02dd", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'Microsoft' '2015 Firmware'"
+
+# elite pad
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="045e", ATTR{idProduct}=="02e3", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'Microsoft' 'Elite'"
+
+# xbox one s
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="045e", ATTR{idProduct}=="02e3", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'Microsoft' 'XONE S'"
+
+
+## Madcatz 0738
+# pad originale
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0738", ATTR{idProduct}=="02d1", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'MadCatz' ''"
+
+# pad originale, firmware 2015
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0738", ATTR{idProduct}=="02dd", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'MadCatz' '2015 Firmware'"
+
+# elite pad
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0738", ATTR{idProduct}=="02e3", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'MadCatz' 'Elite'"
+
+# xbox one s
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0738", ATTR{idProduct}=="02e3", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'MadCatz' 'XONE S'"
+
+
+## Afterglow 0e6f
+# pad originale
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0e6f", ATTR{idProduct}=="02d1", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'Afterglow' ''"
+
+# pad originale, firmware 2015
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0e6f", ATTR{idProduct}=="02dd", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'Afterglow' '2015 Firmware'"
+
+# elite pad
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0e6f", ATTR{idProduct}=="02e3", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'Afterglow' 'Elite'"
+
+# xbox one s
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0e6f", ATTR{idProduct}=="02e3", RUN+="/usr/local/bin/jngctl drv launch xoneusb %E{BUSNUM} %E{DEVNUM} 'Afterglow' 'XONE S'"
+
