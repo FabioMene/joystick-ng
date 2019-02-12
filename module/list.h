@@ -1,7 +1,7 @@
 /*
  * list.h
  * 
- * Copyright 2016-2018 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2016-2019 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

@@ -1,7 +1,7 @@
 /*
  * joystick-ng-client-fops.c
  * 
- * Copyright 2015-2018 Fabio Meneghetti <fabiomene97@gmail.com>
+ * Copyright 2015-2019 Fabio Meneghetti <fabiomene97@gmail.com>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
