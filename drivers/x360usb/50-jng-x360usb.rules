@@ -1,2 +1,2 @@
 # joystick-ng driver x360usb
-ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="045e", ATTR{idProduct}=="028e", RUN+="/usr/local/bin/jngctl drv x360usb exec %E{BUSNUM} %E{DEVNUM}"
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="045e", ATTR{idProduct}=="028e", RUN+="/usr/local/bin/jngctl drv launch x360usb %E{BUSNUM} %E{DEVNUM}"

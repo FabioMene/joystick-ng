@@ -1,10 +1,10 @@
 # Configurazione per il driver ds3
 exec=/usr/local/share/jng/drivers/ds3
 
-set_master_mac = int    | 0 | Imposta il MAC master quando viene collegato. 0: non impostare, 1: usa l'impostazione master_mac, 2: usa 'hcitool dev', 3: usa hcitool e usa master_mac come fallback
+set_master_mac = int    | 0 | Imposta il MAC master quando viene collegato.\n  0: non impostare\n  1: usa l'impostazione master_mac\n  2: usa 'hcitool dev'\n  3: usa hcitool e usa master_mac come fallback
 master_mac     = string |00:00:00:00:00:00| Il MAC da impostare (con set_master_mac a 1 o 3)
 
-set_leds       = int    | 1  | Se 0 non vengono impostati led dal driver (solo feedback). Se 1 i led indicano lo slot. Se 2 il driver imposta l'opzione fixed_leds
+set_leds       = int    | 1  | Imposta lo stato iniziale dei led\n  0: ignora (solo feedback)\n  1: i led indicano lo slot\n  2: il driver imposta l'opzione fixed_leds
 fixed_leds     = string |0001| Questa stringa indica i led fissi, dal quarto al primo
 
 blink_leds     = int    | 1  | Se impostato a 1 fa lampeggiare i led se il controller si sta caricando

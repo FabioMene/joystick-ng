@@ -179,7 +179,24 @@ int main(int argc, char* argv[]){
                         break;
                 }
                 
-                printf("%s (%s)\n    %s\n    [%s]\n\n", opt->name, type_string, opt->description, opt->def);
+                printf("%s (%s)\n", opt->name, type_string);
+
+                char* desc_ptr = opt->description;
+                while(1){
+                    char* lf_ptr = strchr(desc_ptr, '\n');
+
+                    if(lf_ptr){
+                        printf("    %.*s\n", (int)(lf_ptr - desc_ptr), desc_ptr);
+                    } else {
+                        printf("    %s\n", desc_ptr);
+                        break;
+                    }
+
+                    // salta il line feed
+                    desc_ptr = lf_ptr + 1;
+                }
+                printf("    [%s]\n\n", opt->def);
+
             }
             
             free(opts);

@@ -397,6 +397,7 @@ int drvoption_update_option(char* option, char* src){
 #define rsscanf(n, line, fmt...) do{if(sscanf((char*)line, fmt) != n){return 1;}}while(0)
 
 static void _strip_whitespace(char*);
+static void _fix_description(char*);
 
 static int _parse_file(char* path, int(*cb)(internal_option_t**, int*, unsigned char*, int), internal_option_t** dst, int* dstnum, int is_global){
     unsigned char* buffer = NULL;
@@ -482,6 +483,8 @@ static int _parse_def_line(internal_option_t** optdata, int* optnum, unsigned ch
         rsscanf(2, line, "%*255[^ =]%*[ =]%*255[^ |]%*[ ]|%[^|]%*[ |]%511[^|]", opt.def_value, opt.description);
         
         _strip_whitespace(opt.def_value);
+
+        _fix_description(opt.description);
         
         strcpy(opt.value, opt.def_value);
     }
@@ -639,5 +642,18 @@ static void _strip_whitespace(char* ptr){
     
     memmove(ptr, ptr + start, end - start);
     ptr[end - start] = 0;
+}
+
+
+static void _fix_description(char* desc){
+    int i, end = strlen(desc) - 1;
+
+    for(i = 0;i < end;i++){
+        if(desc[i] == '\\' && desc[i + 1] == 'n'){
+            desc[i]     = ' ';
+            desc[i + 1] = '\n';
+            i++;
+        }
+    }
 }
 

@@ -339,6 +339,8 @@ int main(int argc, char* argv[]){
                 printf("SEN  %16s %d\n", table_lookup_name(sensor_table, event.what), event.value);
                 break;
         }
+
+        fflush(stdout);
     }
     
     return 0;
