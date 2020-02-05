@@ -99,11 +99,11 @@ void ds3_update_feedback(int cstate){
             break;
         
         case JNG_EV_FB_FORCE:
-            if(event.what == JNG_FB_FORCE_SMALLMOTOR)
-                ds3_control_packet[2] = event.value ? 255 : 0;
-            else if(event.what == JNG_FB_FORCE_BIGMOTOR)
+            if(event.what == JNG_FB_FORCE_SMALLMOTOR){
+                ds3_control_packet[2] = event.value ? 1 : 0;
+            } else if(event.what == JNG_FB_FORCE_BIGMOTOR){
                 ds3_control_packet[4] = event.value >> 8;
-            break;
+            } break;
         
         case JNG_EV_FB_LED:
             if(event.what == JNG_FB_LED_1){
@@ -337,11 +337,11 @@ int main(int argc, char* argv[]){
         state.axis.RX = get_threshold(report.RX);
         state.axis.RY = get_threshold(report.RY);
         
-        state.accelerometer.x = (report.accelX - 128) << 8;
-        state.accelerometer.y = (report.accelY - 128) << 8;
-        state.accelerometer.z = (report.accelZ - 128) << 8;
-        state.gyrometer.x     = (report.gyroX - 128) << 8;
-        
+        state.accelerometer.x = -(report.accelX) << 8;
+        state.accelerometer.y =  (report.accelY) << 8;
+        state.accelerometer.z = -(report.accelZ) << 8;
+        state.gyrometer.x     = -(report.gyroX)  << 8;
+
         write(jngfd, &state, sizeof(jng_state_t));
         
         if(is_soft_disconnected && report.ps){
